@@ -1,3 +1,4 @@
+import React from "react";
 import { db } from "~/lib/db";
 import { messages } from "~/lib/db/schema";
 import Link from "next/link";
@@ -72,7 +73,14 @@ export const Messages = async ({
             </div>
             <div>
               <h3 className="mb-2 font-medium">Original Content</h3>
-              <div className="whitespace-pre-wrap">{selectedMessage.body}</div>
+              <div className="whitespace-pre-wrap">
+                {selectedMessage.body.split(/\n(?:From:|On .+ wrote:|On .+ Subject:)/).map((part, index, array) => (
+                  <React.Fragment key={index}>
+                    {index > 0 && <hr className="my-4 border-t border-gray-200" />}
+                    {index === 0 ? part : `From:${part}`}
+                  </React.Fragment>
+                ))}
+              </div>
             </div>
           </div>
         ) : (
