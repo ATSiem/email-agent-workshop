@@ -6,6 +6,7 @@ import { db } from "~/lib/db";
 import { clients } from "~/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getUserAccessToken, setUserAccessToken } from "~/lib/auth/microsoft";
+import { getComprehensiveEmails } from "~/lib/email/graph-fetcher";
 
 // Schema for the summarize request
 const summarizeRequestSchema = z.object({
@@ -92,67 +93,175 @@ export async function POST(request: Request) {
       }
     }
     
-    // Build SQL query with domain and email filters
-    console.log('Summarize API - Building SQL query');
-    let sql = `
-      SELECT * FROM messages 
-      WHERE date BETWEEN ? AND ?
-    `;
+    // Use our comprehensive email fetcher
+    console.log('Summarize API - Fetching comprehensive emails for date range:', 
+      data.startDate, 'to', data.endDate);
     
-    const params = [data.startDate, data.endDate];
-    console.log('Summarize API - Date range:', data.startDate, 'to', data.endDate);
+    // Ensure date strings are properly formatted ISO strings
+    // This adds a layer of safety in case the client sends malformed dates
+    let startDateIso = data.startDate;
+    let endDateIso = data.endDate;
     
-    if (clientDomains.length > 0 || clientEmails.length > 0) {
-      const domainClauses = clientDomains.map(domain => 
-        `(\`from\` LIKE '%@${domain}' OR \`to\` LIKE '%@${domain}')`
-      );
+    try {
+      // Ensure startDate is a valid ISO date string with full UTC day coverage
+      const startDate = new Date(data.startDate);
+      startDate.setUTCHours(0, 0, 0, 0);
+      startDateIso = startDate.toISOString();
       
-      const emailClauses = clientEmails.map(email => 
-        `(\`from\` LIKE '%${email}%' OR \`to\` LIKE '%${email}%')`
-      );
+      // Ensure endDate is a valid ISO date string with full UTC day coverage  
+      const endDate = new Date(data.endDate);
+      endDate.setUTCHours(23, 59, 59, 999);
+      endDateIso = endDate.toISOString();
       
-      const allClauses = [...domainClauses, ...emailClauses];
-      if (allClauses.length > 0) {
-        sql += ` AND (${allClauses.join(' OR ')})`;
-      }
+      console.log('Summarize API - Using normalized date range:');
+      console.log(`  - Original startDate: ${data.startDate}`);
+      console.log(`  - Original endDate: ${data.endDate}`);
+      console.log(`  - Normalized startDate: ${startDateIso}`);
+      console.log(`  - Normalized endDate: ${endDateIso}`);
+    } catch (err) {
+      console.error('Summarize API - Error normalizing dates:', err);
+      // Continue with original dates if normalization fails
     }
     
-    sql += ` ORDER BY date ASC`;
-    console.log('Summarize API - Final SQL query:', sql);
-    console.log('Summarize API - Query parameters:', params);
-    
-    // Execute the query and get emails
-    let emails = [];
+    // Get emails from database AND Microsoft Graph if needed
+    let emailResult;
     try {
-      const stmt = db.connection.prepare(sql);
-      emails = stmt.all(...params);
-      console.log('Summarize API - Found emails:', emails.length);
+      // Use the normalized date strings for the query
+      emailResult = await getComprehensiveEmails({
+        startDate: startDateIso,
+        endDate: endDateIso,
+        clientDomains: clientDomains,
+        clientEmails: clientEmails,
+        maxResults: 500 // Increased from 100 to fetch more emails
+      });
       
-      // Exit early if no emails found
-      if (emails.length === 0) {
-        console.log('Summarize API - No emails found for criteria');
+      // Check if we have emails
+      if (!emailResult.emails || emailResult.emails.length === 0) {
+        console.log('Summarize API - No emails found anywhere');
         return NextResponse.json({
           error: "No emails found for the given criteria",
           emailCount: 0
         }, { status: 404 });
       }
       
+      console.log(`Summarize API - Found ${emailResult.emails.length} emails, ${emailResult.fromGraphApi ? 'including' : 'not including'} from Graph API`);
+      
       // Verify email format is what we expect
-      if (emails.length > 0) {
-        console.log('Summarize API - Sample email fields:', Object.keys(emails[0]));
-        console.log('Summarize API - Sample email:', JSON.stringify(emails[0]));
+      if (emailResult.emails.length > 0) {
+        console.log('Summarize API - Sample email fields:', Object.keys(emailResult.emails[0]));
       }
     } catch (err) {
-      console.error('Summarize API - SQL query error:', err);
+      console.error('Summarize API - Error fetching emails:', err);
       return NextResponse.json({
-        error: "Database error when querying emails: " + (err.message || String(err))
+        error: "Error fetching emails: " + (err.message || String(err))
       }, { status: 500 });
     }
     
+    // Set shorthand for emails
+    const emails = emailResult.emails;
+    
     // Generate the summary using AI
     console.log('Summarize API - Generating report with AI');
+    
+    // Enhanced diagnostic info
+    console.log('Summarize API - Email statistics:');
+    console.log(`  - Total email count: ${emails.length}`);
+    
+    // Check date range of emails in the dataset
+    if (emails.length > 0) {
+      try {
+        const sortedDates = [...emails].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        console.log('Summarize API - Email date range in dataset:');
+        console.log(`  - Earliest: ${sortedDates[0].date} (subject: ${sortedDates[0].subject})`);
+        console.log(`  - Latest: ${sortedDates[sortedDates.length-1].date} (subject: ${sortedDates[sortedDates.length-1].subject})`);
+        
+        // Create a histogram of dates to see the distribution
+        const dateMap = new Map();
+        emails.forEach(email => {
+          const day = new Date(email.date).toISOString().split('T')[0];
+          dateMap.set(day, (dateMap.get(day) || 0) + 1);
+        });
+        
+        console.log('Summarize API - Emails by date:');
+        Array.from(dateMap.entries())
+          .sort(([a], [b]) => a.localeCompare(b))
+          .forEach(([date, count]) => console.log(`  - ${date}: ${count} emails`));
+      } catch (err) {
+        console.error('Summarize API - Error analyzing date distribution:', err);
+      }
+    }
+    
     let result;
     try {
+      // Limit the number of emails sent to AI to avoid hitting token limits
+      // Sort emails by date (newest first) to prioritize recent communications
+      const sortedEmails = [...emails].sort((a, b) => 
+        new Date(b.date).getTime() - new Date(a.date).getTime()
+      );
+      
+      // Take at most 15 emails to stay well within token limits
+      // Further limit email content length - truncate long emails
+      const MAX_EMAILS = 15; 
+      const MAX_BODY_LENGTH = 800; // Characters per email body
+      
+      const limitedEmails = sortedEmails
+        .slice(0, MAX_EMAILS)
+        .map(email => ({
+          ...email,
+          // Truncate long email bodies to save tokens
+          body: email.body && email.body.length > MAX_BODY_LENGTH 
+            ? email.body.substring(0, MAX_BODY_LENGTH) + '... [truncated]' 
+            : email.body
+        }));
+      
+      console.log(`Summarize API - Limiting analysis to ${limitedEmails.length} of ${emails.length} emails to stay within token limits`);
+      
+      // If we had to limit, add a note about it
+      const limitNote = limitedEmails.length < emails.length 
+        ? `\nNote: Due to large volume, this analysis focuses on the ${limitedEmails.length} most recent emails of ${emails.length} total.` 
+        : '';
+      
+      // Create a summary of all emails by day and most common subjects
+      let emailMetadata = "";
+      try {
+        // Group emails by date
+        const emailsByDate = {};
+        emails.forEach(email => {
+          const day = new Date(email.date).toISOString().split('T')[0];
+          if (!emailsByDate[day]) emailsByDate[day] = [];
+          emailsByDate[day].push(email);
+        });
+        
+        // Create a summary of emails per day
+        emailMetadata = "Email distribution by date:\n";
+        Object.keys(emailsByDate).sort().forEach(date => {
+          emailMetadata += `- ${date}: ${emailsByDate[date].length} emails\n`;
+        });
+        
+        // Count subject frequencies
+        const subjectCount = {};
+        emails.forEach(email => {
+          const normalizedSubject = email.subject
+            .replace(/^(RE:|FW:|FWD:)\s*/i, '')
+            .trim();
+          subjectCount[normalizedSubject] = (subjectCount[normalizedSubject] || 0) + 1;
+        });
+        
+        // Get top 5 most common threads
+        const topThreads = Object.entries(subjectCount)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5);
+          
+        if (topThreads.length > 0) {
+          emailMetadata += "\nMost active discussion threads:\n";
+          topThreads.forEach(([subject, count]) => {
+            emailMetadata += `- "${subject}" (${count} emails)\n`;
+          });
+        }
+      } catch (err) {
+        console.error('Summarize API - Error generating metadata:', err);
+      }
+      
       const prompt = `Generate a communication report based on these emails ${clientName ? `with ${clientName}` : ''}.
                 Use exactly this format template: "${data.format}"
                 
@@ -162,14 +271,33 @@ export async function POST(request: Request) {
                 Time period: ${new Date(data.startDate).toLocaleDateString()} to ${new Date(data.endDate).toLocaleDateString()}
                 ${clientDomains.length > 0 ? `Client domains: ${clientDomains.join(', ')}` : ''}
                 ${clientEmails.length > 0 ? `Client emails: ${clientEmails.join(', ')}` : ''}
+                ${limitNote}
                 
-                Emails: ${JSON.stringify(emails)}`;
+                Total emails in period: ${emails.length}
+                ${emailMetadata}
+                
+                Detailed analysis of most recent ${limitedEmails.length} emails:
+                ${JSON.stringify(limitedEmails)}`;
       
       console.log('Summarize API - AI prompt length:', prompt.length);
+      console.log('Summarize API - AI prompt email count mentioned:', limitedEmails.length);
       console.log('Summarize API - AI prompt snippet:', prompt.substring(0, 300) + '...');
       
+      // Calculate rough token estimate - 1 token ≈ 4 chars for English text
+      const estimatedTokens = Math.ceil(prompt.length / 4);
+      console.log(`Summarize API - Estimated tokens: ~${estimatedTokens}`);
+      
+      // If still potentially too large, add warning
+      if (estimatedTokens > 100000) {
+        console.log('Summarize API - WARNING: Prompt may still exceed token limits');
+      }
+      
       result = await generateObject({
-        model: openai("gpt-4o-2024-08-06", { structuredOutputs: true }),
+        // Use 128k context model with structured output
+        model: openai("gpt-4o-2024-08-06", { 
+          structuredOutputs: true,
+          maxTokens: 4000 // Limit response size
+        }),
         schemaName: "communicationReport",
         schemaDescription: "A formatted report of email communications",
         schema: z.object({ 
@@ -219,6 +347,7 @@ export async function POST(request: Request) {
       report: result.object.report,
       highlights: result.object.highlights,
       emailCount: emails.length,
+      fromGraphApi: emailResult.fromGraphApi
     });
   } catch (error) {
     console.error("Error generating summary:", error);

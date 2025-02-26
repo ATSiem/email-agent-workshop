@@ -63,6 +63,8 @@ This comment won't appear in the final report.
   const [generatedReport, setGeneratedReport] = useState<string | null>(null);
   const [reportHighlights, setReportHighlights] = useState<string[]>([]);
   const [emailCount, setEmailCount] = useState(0);
+  const [fromGraphApi, setFromGraphApi] = useState(false);
+  const [clientEmails, setClientEmails] = useState<string[]>([]);
   const [error, setError] = useState('');
   
   // Set default date range (last 30 days)
@@ -74,6 +76,33 @@ This comment won't appear in the final report.
     setEndDate(formatDateForInput(end));
     setStartDate(formatDateForInput(start));
   }, []);
+  
+  // Add Graph API notice when report is generated
+  useEffect(() => {
+    if (generatedReport && fromGraphApi) {
+      // Wait a moment for the DOM to update
+      const timer = setTimeout(() => {
+        const reportElement = document.querySelector('.prose');
+        if (reportElement) {
+          // Check if we already added the notice to avoid duplicates
+          if (!document.querySelector('.graph-api-notice')) {
+            const graphInfo = document.createElement('div');
+            graphInfo.className = 'graph-api-notice';
+            graphInfo.innerHTML = `
+              <div class="mt-4 p-3 bg-blue-50 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-md text-sm">
+                <p class="font-medium mb-1">Enhanced Coverage ✓</p>
+                <p>This report includes emails from Microsoft Graph API that weren't in your local database.</p>
+                <p class="mt-1 text-xs opacity-80">All emails have been saved to your database for future use.</p>
+              </div>
+            `;
+            reportElement.appendChild(graphInfo);
+          }
+        }
+      }, 100);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [generatedReport, fromGraphApi]);
   
   // Fetch clients
   useEffect(() => {
@@ -114,6 +143,7 @@ This comment won't appear in the final report.
   useEffect(() => {
     if (!selectedClientId) {
       setTemplates([]);
+      setClientEmails([]);
       return;
     }
     
@@ -140,6 +170,15 @@ This comment won't appear in the final report.
         const data = await response.json();
         console.log('ReportGenerator - Templates data:', data);
         setTemplates(data.templates || []);
+        
+        // Get client details to set emails
+        const selectedClient = clients.find(c => c.id === selectedClientId);
+        if (selectedClient && selectedClient.emails) {
+          console.log('ReportGenerator - Setting client emails:', selectedClient.emails);
+          setClientEmails(selectedClient.emails);
+        } else {
+          setClientEmails([]);
+        }
       } catch (err) {
         console.error('ReportGenerator - Error fetching templates:', err);
         setError(err.message || 'An error occurred loading templates');
@@ -147,7 +186,7 @@ This comment won't appear in the final report.
     }
     
     fetchTemplates();
-  }, [selectedClientId]);
+  }, [selectedClientId, clients]);
   
   // Load template when selected
   useEffect(() => {
@@ -225,6 +264,25 @@ This comment won't appear in the final report.
         throw new Error('Authentication required. Please sign in again.');
       }
       
+      // Log the exact dates we're sending to the API
+      console.log('ReportGenerator - Sending request with date range:');
+      console.log('  - startDate (string):', startDate); 
+      console.log('  - endDate (string):', endDate);
+      console.log('  - startDate (ISO):', new Date(startDate).toISOString());
+      console.log('  - endDate (ISO):', new Date(endDate).toISOString());
+      
+      // Ensure we cover the full day by setting explicit time components
+      // Start of day (midnight)
+      const fullDayStart = new Date(startDate);
+      fullDayStart.setUTCHours(0, 0, 0, 0);
+      
+      // End of day (just before midnight)
+      const fullDayEnd = new Date(endDate);
+      fullDayEnd.setUTCHours(23, 59, 59, 999);
+      
+      console.log('  - fullDayStart (ISO):', fullDayStart.toISOString());
+      console.log('  - fullDayEnd (ISO):', fullDayEnd.toISOString());
+      
       // Generate the report
       const response = await fetch('/api/summarize', {
         method: 'POST',
@@ -233,8 +291,9 @@ This comment won't appear in the final report.
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          startDate,
-          endDate,
+          // Use the explicit full day start and end to ensure we catch all emails
+          startDate: fullDayStart.toISOString(),
+          endDate: fullDayEnd.toISOString(),
           format,
           clientId: selectedClientId,
           saveName: saveName || "",
@@ -252,6 +311,14 @@ This comment won't appear in the final report.
       setGeneratedReport(data.report);
       setReportHighlights(data.highlights || []);
       setEmailCount(data.emailCount || 0);
+      
+      // Check if any emails came from Graph API
+      if (data.fromGraphApi) {
+        console.log('Report includes emails from Microsoft Graph API');
+        setFromGraphApi(true);
+      } else {
+        setFromGraphApi(false);
+      }
       
       if (onReportGenerated) {
         onReportGenerated();
@@ -295,7 +362,26 @@ This comment won't appear in the final report.
             )}
             
             <div className="mt-4 text-sm text-gray-500 dark:text-gray-400">
-              Generated from {emailCount} email{emailCount !== 1 ? 's' : ''} between {new Date(startDate).toLocaleDateString()} and {new Date(endDate).toLocaleDateString()}
+              <div>
+                Generated from <strong>{emailCount}</strong> email{emailCount !== 1 ? 's' : ''} between {new Date(startDate).toLocaleDateString()} and {new Date(endDate).toLocaleDateString()}
+                {fromGraphApi && (
+                  <span className="ml-1 text-blue-600 dark:text-blue-400 font-medium">
+                    (includes emails from Microsoft Graph API)
+                  </span>
+                )}
+              </div>
+              
+              {emailCount > 15 && (
+                <div className="mt-1 py-1 px-2 bg-amber-50 dark:bg-amber-900 rounded text-amber-700 dark:text-amber-300 text-xs">
+                  <span className="font-medium">Note:</span> Due to processing limits, only the 15 most recent emails were analyzed in detail, with metadata from all {emailCount} emails.
+                </div>
+              )}
+              
+              {clientEmails && clientEmails.length > 0 && (
+                <div className="mt-1 text-sm">
+                  Filtered for communication with: <span className="font-mono">{clientEmails.join(', ')}</span>
+                </div>
+              )}
             </div>
           </div>
           
@@ -453,7 +539,7 @@ This comment won't appear in the final report.
               disabled={isGenerating}
               className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-600"
             >
-              {isGenerating ? 'Generating...' : 'Generate Report'}
+              {isGenerating ? 'Processing emails & generating report...' : 'Generate Report'}
             </button>
           </div>
         </form>
