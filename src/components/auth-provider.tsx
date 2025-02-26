@@ -29,8 +29,48 @@ export const useAuth = () => useContext(AuthContext);
 let msalInstance: PublicClientApplication | null = null;
 if (typeof window !== 'undefined') {
   try {
-    msalInstance = new PublicClientApplication(msalConfig);
-    console.log('MSAL instance created');
+    // Clear any stale interaction states before creating a new instance
+    try {
+      localStorage.removeItem('msal.interaction.status');
+      sessionStorage.removeItem('msal.interaction.status');
+      
+      // Additional cleanup for any session storage tokens
+      const storageKeys = Object.keys(sessionStorage);
+      storageKeys.forEach(key => {
+        if (key.startsWith('msal.') && key.includes('idtoken')) {
+          sessionStorage.removeItem(key);
+        }
+      });
+    } catch (e) {
+      console.log('Error clearing cache (non-critical):', e);
+    }
+    
+    // Create MSAL instance with more robust options
+    const enhancedMsalConfig = {
+      ...msalConfig,
+      system: {
+        ...msalConfig.system,
+        allowRedirectInIframe: true,
+        windowHashTimeout: 9000, // Increase timeout for slower connections
+        iframeHashTimeout: 9000,
+        navigateFrameWait: 500, // Handle navigation more gracefully
+      }
+    };
+    
+    msalInstance = new PublicClientApplication(enhancedMsalConfig);
+    console.log('MSAL instance created with enhanced config');
+    
+    // Register event handlers for debugging
+    msalInstance.addEventCallback((event) => {
+      if (event.eventType) {
+        console.log('MSAL Event:', event.eventType, event);
+      }
+    });
+    
+    // Attempt to handle any existing redirect on page load
+    msalInstance.handleRedirectPromise().catch(err => {
+      console.warn('Initial redirect handling error (non-critical):', err);
+    });
   } catch (err) {
     console.error('Failed to create MSAL instance:', err);
   }
@@ -135,17 +175,91 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setIsLoading(true);
       
-      // Use loginRedirect instead of popup for better compatibility
-      await msalInstance.loginRedirect({
-        scopes: loginScopes,
-        prompt: 'select_account'
-      });
+      // Check for interaction in progress by looking at session/local storage
+      // This is compatible with older MSAL versions
+      const hasInteractionInProgress = sessionStorage.getItem('msal.interaction.status') === 'in_progress' || 
+                                      localStorage.getItem('msal.interaction.status') === 'in_progress';
+      
+      if (hasInteractionInProgress) {
+        console.log("Authentication interaction already in progress, waiting for it to complete");
+        setError("Authentication already in progress. Please wait for it to complete.");
+        setIsLoading(false);
+        return;
+      }
+      
+      // Check if there's already an active account
+      const accounts = msalInstance.getAllAccounts();
+      if (accounts.length > 0) {
+        // An account is already active, try to get a token silently first
+        try {
+          const account = accounts[0];
+          const tokenResponse = await msalInstance.acquireTokenSilent({
+            scopes: loginScopes,
+            account: account
+          });
+          handleLoginSuccess(account);
+          return;
+        } catch (silentError) {
+          console.log('Silent token acquisition failed, falling back to redirect:', silentError);
+          // Continue with redirect flow if not an interaction_in_progress error
+          if (silentError.message && silentError.message.includes('interaction_in_progress')) {
+            setError("Authentication already in progress. Please try again in a moment.");
+            setIsLoading(false);
+            return;
+          }
+        }
+      }
+      
+      // Clear any stale login states first
+      try {
+        // Try to clear browser cache of any pending auth states
+        localStorage.removeItem('msal.interaction.status');
+        sessionStorage.removeItem('msal.interaction.status');
+      } catch (e) {
+        console.log('Error clearing cache:', e);
+      }
+      
+      // Use popup login first as it's less prone to interaction_in_progress errors
+      try {
+        console.log("Starting login popup flow");
+        const result = await msalInstance.loginPopup({
+          scopes: loginScopes,
+          prompt: 'select_account'
+        });
+        
+        if (result) {
+          handleLoginSuccess(result.account);
+        }
+      } catch (popupError) {
+        console.log("Popup login failed, falling back to redirect:", popupError);
+        
+        // If popup fails for any reason except user closing the window, try redirect
+        if (popupError.message && !popupError.message.includes('user_cancelled')) {
+          // Use loginRedirect as a fallback
+          console.log("Starting login redirect flow");
+          await msalInstance.loginRedirect({
+            scopes: loginScopes,
+            prompt: 'select_account'
+          });
+        } else {
+          // User cancelled, so just stop loading
+          setIsLoading(false);
+          setError(null);
+        }
+      }
       
       // The page will redirect and come back after auth
       // handleLoginSuccess will be called in the useEffect when the page loads
     } catch (err) {
       console.error('Login error:', err);
-      setError('Login failed. Please try again.');
+      
+      // Special handling for interaction_in_progress errors
+      if (err.message && err.message.includes('interaction_in_progress')) {
+        setError("Authentication already in progress. Please try again after a page refresh.");
+      } else {
+        setError('Login failed. Please try again.');
+      }
+      
       setIsLoading(false);
     }
   };
@@ -179,8 +293,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Try to handle any redirect response on every page load
       console.log('Checking for auth redirect response...');
       
+      // Make sure only one redirect handler runs at a time
+      let redirectHandled = false;
+      
       msalInstance.handleRedirectPromise()
         .then(response => {
+          if (redirectHandled) return;
+          redirectHandled = true;
+          
           // Check for auth response
           if (response) {
             console.log('Received auth redirect response:', response);
@@ -200,6 +320,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .catch(err => {
           console.error('Error handling redirect:', err);
           setError('Login failed. Please try again.');
+        })
+        .finally(() => {
+          // Always set loading to false after redirect handling
+          setIsLoading(false);
         });
     }
   }, [msalInitialized]);
