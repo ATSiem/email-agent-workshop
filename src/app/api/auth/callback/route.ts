@@ -16,7 +16,8 @@ export async function GET(request: Request) {
   console.log('Auth callback - redirect to:', redirectTo);
   console.log('Auth callback - hash fragment present:', !!hash);
   
-  // Redirect back to the home page with any hash fragment
-  // This ensures MSAL can properly process the authentication response
-  return NextResponse.redirect(`${redirectTo}/${hash || ''}`);
+  // Redirect back to the reports page
+  // Since we're now using popup login, this callback shouldn't be used directly
+  // But just in case we still redirect properly
+  return NextResponse.redirect(`${redirectTo}/reports`);
 }

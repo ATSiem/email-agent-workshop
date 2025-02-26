@@ -35,7 +35,26 @@ if (typeof window === 'undefined') {
         updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
         summary TEXT NOT NULL,
         labels TEXT NOT NULL
-      )
+      );
+      
+      CREATE TABLE IF NOT EXISTS clients (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        domains TEXT NOT NULL,
+        emails TEXT NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+      
+      CREATE TABLE IF NOT EXISTS report_templates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        format TEXT NOT NULL,
+        client_id TEXT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        FOREIGN KEY (client_id) REFERENCES clients(id)
+      );
     `);
     
     db = drizzle(sqlite, { schema });

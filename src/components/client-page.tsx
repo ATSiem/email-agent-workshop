@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { cn } from "~/lib/utils";
 import { SyncButton } from "~/components/sync-button";
 import DemoNotice from "~/components/demo-notice";
 import { LoginButton } from "~/components/login-button";
 import { useAuth } from './auth-provider';
+import { EmailDisplay } from './email-display';
 import { Moon, Sun } from 'lucide-react';
+import Link from 'next/link';
 
 export default function ClientPage() {
   const [messages, setMessages] = useState([]);
@@ -71,8 +73,87 @@ export default function ClientPage() {
             }
           });
           const data = await response.json();
-          const fetchedMessages = data.messages || [];
-          setMessages(fetchedMessages);
+          let fetchedMessages = data.messages || [];
+          
+          // Group emails by thread
+          const threadGroups = {};
+          
+          // Normalize subject lines (remove Re:, Fwd:, etc.)
+          const normalizeSubject = (subject) => {
+            // Handle multiple prefixes like "Re: FW:" by applying the regex multiple times
+            let normalized = subject;
+            
+            // Keep removing prefixes until there are no more
+            const prefixRegex = /^(?:Re|FW|Fwd|RE|FWD|Forward):\s*/i;
+            while (prefixRegex.test(normalized)) {
+              normalized = normalized.replace(prefixRegex, '');
+            }
+            
+            // Normalize whitespace
+            return normalized.replace(/\s+/g, ' ').trim();
+          };
+          
+          // Group messages with the same normalized subject
+          fetchedMessages.forEach(message => {
+            const normalizedSubject = normalizeSubject(message.subject);
+            
+            if (!threadGroups[normalizedSubject]) {
+              threadGroups[normalizedSubject] = [];
+            }
+            
+            threadGroups[normalizedSubject].push(message);
+          });
+          
+          // Create one message per thread, combining bodies
+          const threadedMessages = Object.entries(threadGroups).map(([subject, messages]) => {
+            // Sort by date (newest first) 
+            messages.sort((a, b) => new Date(b.date) - new Date(a.date));
+            
+            // Use the latest message as the base
+            const threadMessage = {...messages[0]};
+            
+            // If there's more than one message in the thread, combine them
+            if (messages.length > 1) {
+              // Create a cleaner combined body with proper separation between messages
+              let combinedBody = '';
+              
+              // Sort messages chronologically (oldest first)
+              const chronologicalMessages = [...messages].sort(
+                (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+              );
+              
+              chronologicalMessages.forEach((msg, index) => {
+                // Add separator between messages
+                if (index > 0) {
+                  combinedBody += '\n\n===EMAIL_SEPARATOR===\n\n';
+                }
+                
+                // Extract just the core message content - removing HTML, entities, and signatures
+                let mainContent = msg.body.replace(/<[^>]*>/g, '')  // Remove HTML tags
+                                       .replace(/&nbsp;/g, ' ');    // Decode common entities
+                
+                // Remove common signature patterns
+                mainContent = mainContent.replace(/\n--\n[\s\S]*$/m, ''); // Remove signatures starting with '--'
+                mainContent = mainContent.replace(/\n---+\n[\s\S]*$/m, ''); // Remove signatures with dashes
+                mainContent = mainContent.replace(/\nRegards,[\s\S]*$/m, ''); // Remove 'Regards,' and everything after
+                mainContent = mainContent.replace(/\nBest,[\s\S]*$/m, ''); // Remove 'Best,' and everything after
+                mainContent = mainContent.replace(/\nThanks,[\s\S]*$/m, ''); // Remove 'Thanks,' and everything after
+                mainContent = mainContent.replace(/\nCheers,[\s\S]*$/m, ''); // Remove 'Cheers,' and everything after
+                mainContent = mainContent.replace(/\nSincerely,[\s\S]*$/m, ''); // Remove 'Sincerely,' and everything after
+                
+                combinedBody += mainContent;
+              });
+              
+              threadMessage.body = combinedBody;
+            }
+            
+            return threadMessage;
+          });
+          
+          // Sort threads by date (newest first)
+          threadedMessages.sort((a, b) => new Date(b.date) - new Date(a.date));
+          
+          setMessages(threadedMessages);
           
           // Extract all unique labels from messages
           const labelSet = new Set();
@@ -142,7 +223,15 @@ export default function ClientPage() {
   return (
     <div className="mx-auto mt-10 max-w-screen-lg">
       <div className="mb-6 flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Personal Email Agent</h1>
+        <div className="flex items-center gap-4">
+          <h1 className="text-2xl font-bold">Email Summaries</h1>
+          <Link 
+            href="/reports"
+            className="text-sm bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900 dark:text-blue-300 dark:hover:bg-blue-800 px-3 py-1 rounded-md"
+          >
+            See Client Communication Reports
+          </Link>
+        </div>
         <div className="flex items-center gap-4">
           {/* Dark mode toggle */}
           <button 
@@ -205,7 +294,8 @@ export default function ClientPage() {
             
             <div className="p-4 overflow-auto flex-grow">
               <div className="prose prose-sm dark:prose-invert max-w-none">
-                {selectedMessage.body}
+                {/* Use our clean EmailDisplay component */}
+                <EmailDisplay body={selectedMessage.body} />
               </div>
             </div>
           </div>
@@ -214,12 +304,17 @@ export default function ClientPage() {
       
       {!isAuthenticated ? (
         <div className="bg-blue-50 dark:bg-blue-950 p-8 rounded-lg text-center">
-          <h2 className="text-xl font-semibold mb-4 dark:text-white">Sign in to access your emails</h2>
+          <h2 className="text-xl font-semibold mb-4 dark:text-white">Sign in to view your email summaries</h2>
           <p className="text-gray-600 dark:text-gray-300 mb-6">
             This application requires you to authenticate with Microsoft to access your emails.
             Your data remains private and is only stored on your local device.
           </p>
-          <LoginButton />
+          <div className="flex flex-col gap-4 items-center">
+            <LoginButton />
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              You can also generate <Link href="/reports" className="text-blue-600 hover:text-blue-800 dark:text-blue-400 underline">client communication reports</Link> from your emails
+            </p>
+          </div>
         </div>
       ) : (
         <>

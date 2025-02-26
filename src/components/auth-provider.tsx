@@ -45,20 +45,16 @@ if (typeof window !== 'undefined') {
       console.log('Error clearing cache (non-critical):', e);
     }
     
-    // Create MSAL instance with more robust options
-    const enhancedMsalConfig = {
-      ...msalConfig,
-      system: {
-        ...msalConfig.system,
-        allowRedirectInIframe: true,
-        windowHashTimeout: 9000, // Increase timeout for slower connections
-        iframeHashTimeout: 9000,
-        navigateFrameWait: 500, // Handle navigation more gracefully
-      }
-    };
-    
-    msalInstance = new PublicClientApplication(enhancedMsalConfig);
-    console.log('MSAL instance created with enhanced config');
+    // Create MSAL instance with robust configuration
+    msalInstance = new PublicClientApplication(msalConfig);
+    console.log('MSAL instance created with config:', 
+      JSON.stringify({
+        clientId: msalConfig.auth.clientId ? `${msalConfig.auth.clientId.substring(0, 5)}...` : 'missing',
+        authority: msalConfig.auth.authority,
+        redirectUri: msalConfig.auth.redirectUri,
+        cacheLocation: msalConfig.cache.cacheLocation,
+      })
+    );
     
     // Register event handlers for debugging
     msalInstance.addEventCallback((event) => {
@@ -132,35 +128,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Handle successful login
   const handleLoginSuccess = async (account: any) => {
+    console.log('Handling login success with account:', account);
     setUser(account);
     setIsAuthenticated(true);
     
     // Get access token silently
     try {
       if (msalInstance) {
-        const tokenResponse = await msalInstance.acquireTokenSilent({
-          scopes: loginScopes,
-          account: account
-        });
-        
-        console.log('Got access token:', tokenResponse.accessToken.substring(0, 10) + '...');
-        
-        // Set the token for Graph API calls
-        setUserAccessToken(tokenResponse.accessToken);
-        
-        // For debugging
-        const expiresOn = new Date(tokenResponse.expiresOn).toLocaleString();
-        console.log(`Token expires: ${expiresOn}`);
-        console.log(`Scopes: ${tokenResponse.scopes.join(', ')}`);
+        // Request interactive login if needed to ensure we have a valid token
+        try {
+          console.log('Acquiring token silently for scopes:', loginScopes);
+          const tokenResponse = await msalInstance.acquireTokenSilent({
+            scopes: loginScopes,
+            account: account
+          });
+          
+          console.log('Got access token:', tokenResponse.accessToken.substring(0, 10) + '...');
+          
+          // Set the token for Graph API calls
+          setUserAccessToken(tokenResponse.accessToken);
+          
+          // For debugging
+          const expiresOn = new Date(tokenResponse.expiresOn).toLocaleString();
+          console.log(`Token expires: ${expiresOn}`);
+          console.log(`Scopes: ${tokenResponse.scopes.join(', ')}`);
+          
+          // Clean URL after successful authentication
+          if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }
+        } catch (silentError) {
+          console.error('Error acquiring token silently:', silentError);
+          
+          // Use popup as a fallback when silent acquisition fails
+          if (silentError instanceof InteractionRequiredAuthError) {
+            console.log('Interaction required, trying popup...');
+            const tokenResponse = await msalInstance.acquireTokenPopup({
+              scopes: loginScopes,
+              account: account
+            });
+            
+            console.log('Got access token from popup:', tokenResponse.accessToken.substring(0, 10) + '...');
+            setUserAccessToken(tokenResponse.accessToken);
+          } else {
+            throw silentError; // Re-throw if not an interaction required error
+          }
+        }
       }
     } catch (err) {
-      if (err instanceof InteractionRequiredAuthError) {
-        // User needs to login interactively
-        login();
-      } else {
-        console.error('Error acquiring token:', err);
-        setError('Error acquiring authentication token.');
-      }
+      console.error('Error acquiring token:', err);
+      setError('Error acquiring authentication token. Please try refreshing the page.');
     }
   };
 
@@ -181,10 +198,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                                       localStorage.getItem('msal.interaction.status') === 'in_progress';
       
       if (hasInteractionInProgress) {
-        console.log("Authentication interaction already in progress, waiting for it to complete");
-        setError("Authentication already in progress. Please wait for it to complete.");
-        setIsLoading(false);
-        return;
+        console.log("Authentication interaction already in progress, clearing and restarting");
+        
+        // Try to clear the interaction state
+        try {
+          localStorage.removeItem('msal.interaction.status');
+          sessionStorage.removeItem('msal.interaction.status');
+          
+          // Additional cleanup for any auth-related storage items
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('msal.')) {
+              localStorage.removeItem(key);
+            }
+          }
+          
+          for (let i = 0; i < sessionStorage.length; i++) {
+            const key = sessionStorage.key(i);
+            if (key && key.startsWith('msal.')) {
+              sessionStorage.removeItem(key);
+            }
+          }
+          
+          // Reload the page to clear any in-memory state
+          window.location.reload();
+          return;
+        } catch (e) {
+          console.error('Error clearing auth state:', e);
+          setError("Authentication already in progress. Please try refreshing the page.");
+          setIsLoading(false);
+          return;
+        }
       }
       
       // Check if there's already an active account
@@ -219,33 +263,95 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log('Error clearing cache:', e);
       }
       
+      // Check if we have a valid client ID before attempting login
+      // Check if MSAL instance is available
+      if (!msalInstance) {
+        console.error("MSAL instance is null or undefined");
+        setError("Authentication system is not available. Please try refreshing the page.");
+        setIsLoading(false);
+        return;
+      }
+      
+      // Log configuration details for debugging
+      const clientId = msalConfig.auth.clientId;
+      if (!clientId || clientId === '') {
+        console.error("Azure client ID is missing. Check your environment variables.");
+        setError("Microsoft authentication is not properly configured. Please check the application settings.");
+        setIsLoading(false);
+        return;
+      }
+      
+      console.log("Using client ID:", clientId.substring(0, 5) + "...");
+      console.log("Redirect URI:", msalConfig.auth.redirectUri);
+      console.log("Authority:", msalConfig.auth.authority);
+      
       // Use popup login first as it's less prone to interaction_in_progress errors
       try {
         console.log("Starting login popup flow");
+        
+        // Check for interaction in progress
+        const hasInteractionInProgress = sessionStorage.getItem('msal.interaction.status') === 'in_progress' || 
+                                        localStorage.getItem('msal.interaction.status') === 'in_progress';
+        
+        if (hasInteractionInProgress) {
+          console.log("Authentication interaction already in progress, clearing state");
+          localStorage.removeItem('msal.interaction.status');
+          sessionStorage.removeItem('msal.interaction.status');
+          
+          // Clear any MSAL-related items from storage
+          Object.keys(localStorage).forEach(key => {
+            if (key.startsWith('msal.')) localStorage.removeItem(key);
+          });
+          
+          Object.keys(sessionStorage).forEach(key => {
+            if (key.startsWith('msal.')) sessionStorage.removeItem(key);
+          });
+          
+          setError("Authentication already in progress. Please try again.");
+          setIsLoading(false);
+          return;
+        }
+        
+        // Attempt to use popup login
         const result = await msalInstance.loginPopup({
           scopes: loginScopes,
           prompt: 'select_account'
         });
         
         if (result) {
+          console.log("Popup login successful, handling login success");
           handleLoginSuccess(result.account);
         }
-      } catch (popupError) {
-        console.log("Popup login failed, falling back to redirect:", popupError);
+      } catch (loginError) {
+        console.error('Login error:', loginError);
         
-        // If popup fails for any reason except user closing the window, try redirect
-        if (popupError.message && !popupError.message.includes('user_cancelled')) {
-          // Use loginRedirect as a fallback
-          console.log("Starting login redirect flow");
-          await msalInstance.loginRedirect({
-            scopes: loginScopes,
-            prompt: 'select_account'
-          });
-        } else {
-          // User cancelled, so just stop loading
+        // If user cancelled popup, don't show an error
+        if (loginError.message && loginError.message.includes('user_cancelled')) {
+          console.log('User cancelled the login popup');
           setIsLoading(false);
-          setError(null);
+          return;
         }
+        
+        if (loginError.message && loginError.message.includes('interaction_in_progress')) {
+          // If interaction is in progress, clear state
+          localStorage.removeItem('msal.interaction.status');
+          sessionStorage.removeItem('msal.interaction.status');
+          
+          // Clean all MSAL-related items from storage
+          Object.keys(localStorage).forEach(key => {
+            if (key.startsWith('msal.')) localStorage.removeItem(key);
+          });
+          
+          Object.keys(sessionStorage).forEach(key => {
+            if (key.startsWith('msal.')) sessionStorage.removeItem(key);
+          });
+          
+          setError("Auth session was stuck. Please refresh the page and try signing in again.");
+        } else {
+          setError('Login failed: ' + loginError.message);
+        }
+        
+        setIsLoading(false);
       }
       
       // The page will redirect and come back after auth
@@ -255,7 +361,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       // Special handling for interaction_in_progress errors
       if (err.message && err.message.includes('interaction_in_progress')) {
-        setError("Authentication already in progress. Please try again after a page refresh.");
+        // Clear all MSAL storage to fix the issue
+        localStorage.removeItem('msal.interaction.status');
+        sessionStorage.removeItem('msal.interaction.status');
+        
+        // Clean all MSAL-related items from storage
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('msal.')) localStorage.removeItem(key);
+        });
+        
+        Object.keys(sessionStorage).forEach(key => {
+          if (key.startsWith('msal.')) sessionStorage.removeItem(key);
+        });
+        
+        setError("Authentication was stuck. Please refresh the page and try again.");
       } else {
         setError('Login failed. Please try again.');
       }
@@ -268,6 +387,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     try {
       if (msalInstance) {
+        // Clean all MSAL-related items from storage
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('msal.')) localStorage.removeItem(key);
+        });
+        
+        Object.keys(sessionStorage).forEach(key => {
+          if (key.startsWith('msal.')) sessionStorage.removeItem(key);
+        });
+        
         // Just clear the account locally instead of a full logout
         msalInstance.clearCache();
         
@@ -281,20 +409,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
         setIsAuthenticated(false);
         setUserAccessToken(null);
+        
+        // Remove the token from session storage
+        sessionStorage.removeItem('msGraphToken');
+        
+        console.log('Logout completed successfully');
       }
     } catch (err) {
       console.error('Logout error:', err);
     }
   };
 
-  // Add a useEffect to handle redirect callback
+  // Add a useEffect to handle redirect callback and check for hard reset flags
   useEffect(() => {
+    // Check for special auth reset flags
+    if (typeof window !== 'undefined') {
+      // Check if we need to clear storage on page load due to previous auth issues
+      if (sessionStorage.getItem('auth_hard_reset') === 'true') {
+        console.log('Hard reset flag detected, clearing all storage');
+        
+        // Clear the flag first
+        sessionStorage.removeItem('auth_hard_reset');
+        
+        // Clear all storage
+        localStorage.clear();
+        sessionStorage.clear();
+        
+        // Reload the page one more time with clean state
+        window.location.reload();
+        return;
+      }
+    }
+    
     if (msalInstance && msalInitialized) {
       // Try to handle any redirect response on every page load
       console.log('Checking for auth redirect response...');
       
       // Make sure only one redirect handler runs at a time
       let redirectHandled = false;
+      
+      // Clear any auth_flow_starting flag if it exists
+      if (sessionStorage.getItem('auth_flow_starting') === 'true') {
+        console.log('Clearing auth_flow_starting flag');
+        sessionStorage.removeItem('auth_flow_starting');
+      }
+      
+      // Check if we're on a URL with a code/hash fragment - this indicates a redirect is being processed
+      if (window.location.hash && window.location.hash.includes('code=')) {
+        console.log('Found auth code in URL hash, processing authentication response...');
+      }
       
       msalInstance.handleRedirectPromise()
         .then(response => {
@@ -305,20 +468,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (response) {
             console.log('Received auth redirect response:', response);
             handleLoginSuccess(response.account);
+            
+            // Clean up the URL hash
+            if (window.history && window.history.replaceState) {
+              window.history.replaceState({}, document.title, window.location.pathname);
+            }
           } 
           // If no response but we're on a URL with a code/hash fragment
           else if (window.location.hash && window.location.hash.includes('code=')) {
-            console.log('Found auth code in URL hash, trying to process');
+            console.log('Found auth code in URL hash, trying to process manually');
             // Try to get accounts directly
             const accounts = msalInstance.getAllAccounts();
             if (accounts.length > 0) {
               console.log('Found account after redirect:', accounts[0]);
               handleLoginSuccess(accounts[0]);
+              
+              // Clean up the URL hash
+              if (window.history && window.history.replaceState) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+              }
+            } else {
+              console.log('No accounts found, requesting token silently...');
+              // Try to request the token silently, which might work with the code in the URL
+              msalInstance.acquireTokenSilent({ scopes: loginScopes })
+                .then(tokenResponse => {
+                  console.log('Successfully acquired token silently');
+                  handleLoginSuccess(tokenResponse.account);
+                  
+                  // Clean up the URL hash
+                  if (window.history && window.history.replaceState) {
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                  }
+                })
+                .catch(error => {
+                  console.log('Failed to acquire token silently:', error);
+                });
             }
           }
         })
         .catch(err => {
           console.error('Error handling redirect:', err);
+          
+          // If we get an interaction_in_progress error during redirect handling,
+          // set the hard reset flag
+          if (err.message && err.message.includes('interaction_in_progress')) {
+            console.log('Setting hard reset flag due to interaction_in_progress during redirect');
+            sessionStorage.setItem('auth_hard_reset', 'true');
+            
+            // Reload the page
+            window.location.reload();
+            return;
+          }
+          
           setError('Login failed. Please try again.');
         })
         .finally(() => {

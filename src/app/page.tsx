@@ -1,5 +1,5 @@
-import ClientPage from '~/components/client-page';
+import { redirect } from 'next/navigation';
 
 export default function Page() {
-  return <ClientPage />;
+  redirect('/reports');
 }

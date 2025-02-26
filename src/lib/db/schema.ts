@@ -18,3 +18,29 @@ export const messages = sqliteTable("messages", {
   summary: text("summary").notNull(),
   labels: text("labels").notNull(), // SQLite doesn't support arrays, we'll store JSON string
 });
+
+export const clients = sqliteTable("clients", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  domains: text("domains").notNull(), // JSON string with domains
+  emails: text("emails").notNull(),   // JSON string with specific emails
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
+export const reportTemplates = sqliteTable("report_templates", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  format: text("format").notNull(),
+  clientId: text("client_id").references(() => clients.id),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});

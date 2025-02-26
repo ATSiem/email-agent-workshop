@@ -27,12 +27,26 @@ let userAccessToken: string | null = getPersistedToken();
 export const msalConfig = {
   auth: {
     clientId: process.env.NEXT_PUBLIC_AZURE_CLIENT_ID || '',
-    authority: `https://login.microsoftonline.com/${process.env.NEXT_PUBLIC_AZURE_TENANT_ID || ''}`,
+    authority: `https://login.microsoftonline.com/${process.env.NEXT_PUBLIC_AZURE_TENANT_ID || 'common'}`,
     redirectUri: process.env.NEXT_PUBLIC_AZURE_REDIRECT_URI || 'http://localhost:3000/api/auth/callback',
   },
   cache: {
     cacheLocation: 'sessionStorage',
     storeAuthStateInCookie: true, // Enable cookies for better persistence
+  },
+  system: {
+    allowRedirectInIframe: true,
+    windowHashTimeout: 9000, // Increase timeout for slower connections
+    iframeHashTimeout: 9000,
+    navigateFrameWait: 500, // Handle navigation more gracefully
+    loggerOptions: {
+      loggerCallback: (level, message, containsPii) => {
+        if (!containsPii) {
+          console.log(`MSAL (${level}): ${message}`);
+        }
+      },
+      logLevel: 'Info',
+    }
   }
 };
 
@@ -57,6 +71,12 @@ export function getUserAccessToken() {
   if (typeof window !== 'undefined') {
     userAccessToken = getPersistedToken();
     console.log('Retrieved token from storage:', userAccessToken ? 'present' : 'not found');
+  } else {
+    // This is running on the server side
+    console.log('getUserAccessToken called on server side - tokens are not available here');
+    console.log('Current token is:', userAccessToken ? 'present (from memory)' : 'not available');
+    // On server side, we can only use the token if it was previously set in memory
+    // during this request lifecycle
   }
   return userAccessToken;
 }
