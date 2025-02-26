@@ -41,7 +41,10 @@ export const Messages = async ({
           >
             <h3 className="mb-2 font-medium">{message.subject}</h3>
             <div className="flex flex-wrap gap-2">
-              {message.labels.map((label, index) => (
+              {(typeof message.labels === 'string' 
+                ? JSON.parse(message.labels) 
+                : (Array.isArray(message.labels) ? message.labels : [])
+              ).map((label: string, index: number) => (
                 <span
                   key={index}
                   className="bg-secondary text-secondary-foreground rounded-md px-2 py-1 text-sm"

@@ -150,3 +150,29 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Custom styling for card effects */
+@layer utilities {
+  .backface-hidden {
+    backface-visibility: hidden;
+  }
+  
+  .rotate-y-180 {
+    transform: rotateY(180deg);
+  }
+  
+  /* Card flip animation */
+  .transform-style-3d {
+    transform-style: preserve-3d;
+  }
+  
+  /* Card hover effect */
+  .card-hover {
+    transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
+  }
+  
+  .card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+  }
+}

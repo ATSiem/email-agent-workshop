@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
-export const messages = pgTable("messages", {
+export const messages = sqliteTable("messages", {
   id: text("id").primaryKey(),
   subject: text("subject").notNull(),
   from: text("from").notNull(),
@@ -9,15 +9,12 @@ export const messages = pgTable("messages", {
   date: text("date").notNull(),
   body: text("body").notNull(),
   attachments: text("attachments").notNull(),
-  createdAt: timestamp("created_at")
+  createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
-    .default(sql`now()`),
-  updatedAt: timestamp("updated_at")
+    .default(sql`(unixepoch())`),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
     .notNull()
-    .default(sql`now()`),
+    .default(sql`(unixepoch())`),
   summary: text("summary").notNull(),
-  labels: text("labels")
-    .notNull()
-    .array()
-    .default(sql`'{}'::text[]`),
+  labels: text("labels").notNull(), // SQLite doesn't support arrays, we'll store JSON string
 });

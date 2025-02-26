@@ -58,7 +58,7 @@ export async function POST(request: Request) {
         body: validatedData.body,
         attachments: JSON.stringify(validatedData.attachments),
         summary: result.object.summary,
-        labels: result.object.labels,
+        labels: JSON.stringify(result.object.labels), // Store as JSON string for SQLite
         date: validatedData.date,
       })
       .onConflictDoNothing({ target: messages.id });

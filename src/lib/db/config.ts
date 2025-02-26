@@ -1,8 +1,11 @@
 import { defineConfig } from "drizzle-kit";
+import { env } from "~/lib/env";
 
 export default defineConfig({
-  dialect: "postgresql",
+  dialect: "sqlite",
   schema: "./src/lib/db/schema.ts",
   out: "./src/lib/db/migrations",
-  dbCredentials: { url: process.env.DATABASE_URL! },
+  dbCredentials: { 
+    url: `file:${env.SQLITE_DB_PATH}`,
+  },
 });
