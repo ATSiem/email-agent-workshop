@@ -37,6 +37,12 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
 ### Key Topics Discussed
 {key_topics}
 
+### Significant Strategy Changes
+{strategy_changes}
+
+### Current Strategy vs Previous Approaches
+{strategy_comparison}
+
 ### Key Technologies
 {key_technologies}
 
@@ -47,17 +53,12 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
 {next_steps}
 
 ### Open Questions
-{open_questions}
-
-<!-- 
-Pro tip: You can create your own custom placeholders like {key_technologies}, {project_status}, 
-{stakeholders}, {decision_summary}, etc. The AI will understand what content to generate!
-This comment won't appear in the final report. 
--->`);
+{open_questions}`);
   
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [saveName, setSaveName] = useState('');
+  const [examplePrompt, setExamplePrompt] = useState('');
   
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedReport, setGeneratedReport] = useState<string | null>(null);
@@ -205,6 +206,13 @@ This comment won't appear in the final report.
         console.log('ReportGenerator - Template data:', template);
         setFormat(template.format);
         setSaveName(""); // Clear the save name field instead of adding "- Copy"
+        
+        // Set example prompt if available
+        if (template.example_prompt) {
+          setExamplePrompt(template.example_prompt);
+        } else {
+          setExamplePrompt("");
+        }
       } catch (err) {
         console.error('ReportGenerator - Error fetching template:', err);
         setError(err.message || 'An error occurred loading the template');
@@ -286,6 +294,7 @@ This comment won't appear in the final report.
           format,
           clientId: selectedClientId,
           saveName: saveName || "",
+          examplePrompt: examplePrompt || "",
         }),
       });
       
@@ -484,21 +493,40 @@ This comment won't appear in the final report.
             </details>
           </div>
           
-          <div>
-            <label htmlFor="saveName" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Save As Template (Optional)
-            </label>
-            <input
-              type="text"
-              id="saveName"
-              value={saveName}
-              onChange={(e) => setSaveName(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-              placeholder="Template name"
-            />
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              If provided, this format will be saved for future use
-            </p>
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="examplePrompt" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Example/Instructions (Optional)
+              </label>
+              <textarea
+                id="examplePrompt"
+                value={examplePrompt}
+                onChange={(e) => setExamplePrompt(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                placeholder="Provide examples or specific instructions for how to identify strategy changes or what to focus on in communications"
+              />
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Add examples of what you're looking for or specific instructions to enhance report quality
+              </p>
+            </div>
+            
+            <div>
+              <label htmlFor="saveName" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Save As Template (Optional)
+              </label>
+              <input
+                type="text"
+                id="saveName"
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                placeholder="Template name"
+              />
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                If provided, this format will be saved for future use
+              </p>
+            </div>
           </div>
           
           <div className="flex justify-end">

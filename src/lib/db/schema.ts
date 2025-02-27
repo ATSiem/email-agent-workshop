@@ -17,6 +17,9 @@ export const messages = sqliteTable("messages", {
     .default(sql`(unixepoch())`),
   summary: text("summary").notNull(),
   labels: text("labels").notNull(), // SQLite doesn't support arrays, we'll store JSON string
+  // For vector search
+  embedding: text("embedding"), // JSON string of vector representation
+  processedForVector: integer("processed_for_vector").default(0), // Flag to track embedding generation
 });
 
 export const clients = sqliteTable("clients", {
@@ -43,4 +46,6 @@ export const reportTemplates = sqliteTable("report_templates", {
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),
+  // Track examples provided for this template
+  examplePrompt: text("example_prompt"),
 });

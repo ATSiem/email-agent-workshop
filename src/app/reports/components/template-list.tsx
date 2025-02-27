@@ -10,6 +10,7 @@ interface Template {
   format: string;
   client_id: string | null;
   client_name: string | null;
+  example_prompt?: string | null;
   expanded?: boolean;
 }
 
@@ -192,6 +193,15 @@ export function TemplateList({ onSelectTemplate }: TemplateListProps) {
                     <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-md text-sm font-mono text-gray-700 dark:text-gray-300 overflow-hidden whitespace-pre-wrap">
                       <h4 className="font-semibold text-xs text-gray-500 dark:text-gray-400 mb-2">TEMPLATE FORMAT:</h4>
                       {template.format}
+                      
+                      {template.example_prompt && (
+                        <>
+                          <h4 className="font-semibold text-xs text-gray-500 dark:text-gray-400 mt-4 mb-2">EXAMPLES/INSTRUCTIONS:</h4>
+                          <div className="text-sm text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-600 p-2 rounded-md">
+                            {template.example_prompt}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                   

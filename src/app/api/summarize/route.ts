@@ -17,6 +17,7 @@ const summarizeRequestSchema = z.object({
   emails: z.array(z.string()).optional(),
   clientId: z.string().optional(),
   saveName: z.string().nullable().optional(), // Optional name to save this template
+  examplePrompt: z.string().nullable().optional(), // Optional examples/instructions for the template
 });
 
 export async function POST(request: Request) {
@@ -284,11 +285,15 @@ export async function POST(request: Request) {
       }
       
       // Build prompt with two-tier approach
-      const prompt = `Generate a communication report based on these emails ${clientName ? `with ${clientName}` : ''}.
+      let prompt = `Generate a communication report based on these emails ${clientName ? `with ${clientName}` : ''}.
                 Use exactly this format template: "${data.format}"
                 
                 The template may contain placeholders like {date_range}, {summary}, {action_items}, etc.
                 Replace these placeholders with appropriate content summarized from the emails.
+                
+                Pay special attention to identifying strategy changes and shifts in direction in these communications. 
+                Look for patterns that show how the current approach differs from previous strategies discussed.
+                Highlight any significant pivots or changes in project focus.
                 
                 Time period: ${new Date(data.startDate).toLocaleDateString()} to ${new Date(data.endDate).toLocaleDateString()}
                 ${clientDomains.length > 0 ? `Client domains: ${clientDomains.join(', ')}` : ''}
@@ -306,6 +311,14 @@ export async function POST(request: Request) {
                 ${summaryEmails.length > 0 ? 
                   `TIER 2 - Summary of next ${summaryEmails.length} emails (metadata only):
                    ${JSON.stringify(summaryEmails)}` : ''}`;
+                   
+      // Add user-provided examples or instructions if available
+      if (data.examplePrompt && data.examplePrompt.trim()) {
+        prompt += `\n\nSPECIAL INSTRUCTIONS OR EXAMPLES:
+        ${data.examplePrompt}
+        
+        Use these examples or instructions to guide your analysis, especially for strategy changes.`
+      }
       
       // Log diagnostic information about the prompt
       console.log('Summarize API - AI prompt length:', prompt.length);
@@ -351,12 +364,18 @@ export async function POST(request: Request) {
       console.log('Summarize API - Saving template:', data.saveName);
       try {
         const saveStmt = db.connection.prepare(`
-          INSERT INTO report_templates (id, name, format, client_id, created_at, updated_at)
-          VALUES (?, ?, ?, ?, unixepoch(), unixepoch())
+          INSERT INTO report_templates (id, name, format, client_id, created_at, updated_at, example_prompt)
+          VALUES (?, ?, ?, ?, unixepoch(), unixepoch(), ?)
         `);
         
         const templateId = crypto.randomUUID();
-        saveStmt.run(templateId, data.saveName, data.format, data.clientId);
+        saveStmt.run(
+          templateId, 
+          data.saveName, 
+          data.format, 
+          data.clientId, 
+          data.examplePrompt || null
+        );
         console.log('Summarize API - Template saved with ID:', templateId);
       } catch (err) {
         console.error('Summarize API - Error saving template:', err);

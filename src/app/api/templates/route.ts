@@ -8,6 +8,7 @@ const templateSchema = z.object({
   name: z.string().min(1, "Template name is required"),
   format: z.string().min(1, "Template format is required"),
   clientId: z.string().optional(),
+  examplePrompt: z.string().optional(),
 });
 
 export async function GET(request: Request) {
@@ -137,15 +138,16 @@ export async function POST(request: Request) {
     
     // Insert the new template
     const stmt = db.connection.prepare(`
-      INSERT INTO report_templates (id, name, format, client_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, unixepoch(), unixepoch())
+      INSERT INTO report_templates (id, name, format, client_id, created_at, updated_at, example_prompt)
+      VALUES (?, ?, ?, ?, unixepoch(), unixepoch(), ?)
     `);
     
     stmt.run(
       templateId,
       data.name,
       data.format,
-      data.clientId || null
+      data.clientId || null,
+      data.examplePrompt || null
     );
     
     return NextResponse.json({
@@ -153,6 +155,7 @@ export async function POST(request: Request) {
       name: data.name,
       format: data.format,
       clientId: data.clientId || null,
+      examplePrompt: data.examplePrompt || null,
     }, { status: 201 });
   } catch (error) {
     console.error("Error creating template:", error);
@@ -239,7 +242,7 @@ export async function PUT(request: Request) {
     // Update the template
     const updateStmt = db.connection.prepare(`
       UPDATE report_templates
-      SET name = ?, format = ?, client_id = ?, updated_at = unixepoch()
+      SET name = ?, format = ?, client_id = ?, updated_at = unixepoch(), example_prompt = ?
       WHERE id = ?
     `);
     
@@ -247,6 +250,7 @@ export async function PUT(request: Request) {
       data.name,
       data.format,
       data.clientId || null,
+      data.examplePrompt || null,
       templateId
     );
     
@@ -255,6 +259,7 @@ export async function PUT(request: Request) {
       name: data.name,
       format: data.format,
       clientId: data.clientId || null,
+      examplePrompt: data.examplePrompt || null,
     });
   } catch (error) {
     console.error("Error updating template:", error);
