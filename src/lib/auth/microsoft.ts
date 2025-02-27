@@ -67,17 +67,26 @@ export function setUserAccessToken(token: string | null) {
 
 // Function to get the user's access token
 export function getUserAccessToken() {
-  // We always check storage when running in the browser
+  // Check if we're in the browser
   if (typeof window !== 'undefined') {
-    userAccessToken = getPersistedToken();
-    console.log('Retrieved token from storage:', userAccessToken ? 'present' : 'not found');
+    // Always prioritize the token from sessionStorage for reliability
+    const storedToken = getPersistedToken();
+    
+    if (storedToken) {
+      // Update memory copy with storage value
+      userAccessToken = storedToken;
+      return storedToken;
+    }
+    
+    // If we have a token in memory but not in storage, save it to storage
+    if (userAccessToken) {
+      saveTokenToStorage(userAccessToken);
+    }
   } else {
-    // This is running on the server side
-    console.log('getUserAccessToken called on server side - tokens are not available here');
-    console.log('Current token is:', userAccessToken ? 'present (from memory)' : 'not available');
-    // On server side, we can only use the token if it was previously set in memory
-    // during this request lifecycle
+    // Running on server side - can only use in-memory token
+    console.log('getUserAccessToken called on server side');
   }
+  
   return userAccessToken;
 }
 

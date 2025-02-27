@@ -9,15 +9,27 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const redirectTo = url.origin;
   
-  // If there's a hash fragment (common with MSAL), we need to forward it to the client
-  // for proper MSAL processing
-  const hash = url.hash || request.headers.get('x-hash-fragment');
+  // Get authorization code and state from URL parameters
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
   
-  console.log('Auth callback - redirect to:', redirectTo);
-  console.log('Auth callback - hash fragment present:', !!hash);
+  console.log('Auth callback received:', { hasCode: !!code, hasState: !!state });
   
-  // Redirect back to the reports page
-  // Since we're now using popup login, this callback shouldn't be used directly
-  // But just in case we still redirect properly
-  return NextResponse.redirect(`${redirectTo}/reports`);
+  // Create a URL with the auth code and state to be processed by MSAL in the frontend
+  // This approach passes the authentication parameters to the client-side MSAL
+  const clientUrl = new URL(redirectTo);
+  
+  // Add the auth parameters to the hash (MSAL expects them in the hash)
+  let hashParams = [];
+  if (code) hashParams.push(`code=${encodeURIComponent(code)}`);
+  if (state) hashParams.push(`state=${encodeURIComponent(state)}`);
+  
+  if (hashParams.length > 0) {
+    clientUrl.hash = hashParams.join('&');
+  }
+  
+  console.log('Redirecting to:', clientUrl.toString());
+  
+  // Redirect to the main page with auth parameters in the URL hash
+  return NextResponse.redirect(clientUrl.toString());
 }

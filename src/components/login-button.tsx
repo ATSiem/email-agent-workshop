@@ -1,9 +1,11 @@
 'use client';
 
+import { useState } from 'react';
 import { useAuth } from './auth-provider';
 
 export function LoginButton() {
   const { isAuthenticated, isLoading, login, logout, user, error } = useAuth();
+  const [buttonState, setButtonState] = useState<'idle' | 'processing'>('idle');
 
   if (isLoading) {
     return (
@@ -20,10 +22,18 @@ export function LoginButton() {
           {user?.username || user?.name || 'Signed in'}
         </span>
         <button 
-          onClick={logout}
-          className="bg-red-500 hover:bg-red-600 text-white rounded-md px-4 py-2 transition-colors"
+          onClick={() => {
+            setButtonState('processing');
+            logout();
+          }}
+          disabled={buttonState === 'processing'}
+          className={`${
+            buttonState === 'processing' 
+              ? 'bg-gray-400 cursor-not-allowed' 
+              : 'bg-red-500 hover:bg-red-600 cursor-pointer'
+          } text-white rounded-md px-4 py-2 transition-colors`}
         >
-          Sign Out
+          {buttonState === 'processing' ? 'Signing Out...' : 'Sign Out'}
         </button>
       </div>
     );
@@ -32,14 +42,18 @@ export function LoginButton() {
   return (
     <div className="flex flex-col items-center gap-2">
       <button 
-        onClick={(e) => {
-          e.preventDefault();
-          console.log("Login button clicked, calling login()");
+        onClick={() => {
+          setButtonState('processing');
           login();
         }}
-        className="bg-blue-500 hover:bg-blue-600 text-white rounded-md px-4 py-2 transition-colors"
+        disabled={buttonState === 'processing'}
+        className={`${
+          buttonState === 'processing'
+            ? 'bg-gray-400 cursor-not-allowed' 
+            : 'bg-blue-500 hover:bg-blue-600 cursor-pointer'
+        } text-white rounded-md px-4 py-2 transition-colors`}
       >
-        Sign in with Microsoft
+        {buttonState === 'processing' ? 'Signing in...' : 'Sign in with Microsoft'}
       </button>
       
       {error && (
