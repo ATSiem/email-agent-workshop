@@ -67,42 +67,31 @@ This comment won't appear in the final report.
   const [clientEmails, setClientEmails] = useState<string[]>([]);
   const [error, setError] = useState('');
   
-  // Set default date range (last 30 days)
+  // Set default date range (current week starting from Monday)
   useEffect(() => {
     const end = new Date();
     const start = new Date();
-    start.setDate(start.getDate() - 30);
+    
+    // Get current day of week (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
+    const currentDay = start.getDay();
+    
+    // Calculate days to subtract to get to Monday
+    // If today is Sunday (0), we need to go back 6 days to previous Monday
+    // If today is Monday (1), we go back 0 days
+    // If today is Tuesday (2), we go back 1 day, etc.
+    const daysToSubtract = currentDay === 0 ? 6 : currentDay - 1;
+    
+    // Set to the Monday of the current week
+    start.setDate(start.getDate() - daysToSubtract);
+    
+    // Set to midnight on that day
+    start.setHours(0, 0, 0, 0);
     
     setEndDate(formatDateForInput(end));
     setStartDate(formatDateForInput(start));
   }, []);
   
-  // Add Graph API notice when report is generated
-  useEffect(() => {
-    if (generatedReport && fromGraphApi) {
-      // Wait a moment for the DOM to update
-      const timer = setTimeout(() => {
-        const reportElement = document.querySelector('.prose');
-        if (reportElement) {
-          // Check if we already added the notice to avoid duplicates
-          if (!document.querySelector('.graph-api-notice')) {
-            const graphInfo = document.createElement('div');
-            graphInfo.className = 'graph-api-notice';
-            graphInfo.innerHTML = `
-              <div class="mt-4 p-3 bg-blue-50 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-md text-sm">
-                <p class="font-medium mb-1">Enhanced Coverage ✓</p>
-                <p>This report includes emails from Microsoft Graph API that weren't in your local database.</p>
-                <p class="mt-1 text-xs opacity-80">All emails have been saved to your database for future use.</p>
-              </div>
-            `;
-            reportElement.appendChild(graphInfo);
-          }
-        }
-      }, 100);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [generatedReport, fromGraphApi]);
+  // Graph API notice has been removed
   
   // Fetch clients
   useEffect(() => {
@@ -361,28 +350,7 @@ This comment won't appear in the final report.
               </div>
             )}
             
-            <div className="mt-4 text-sm text-gray-500 dark:text-gray-400">
-              <div>
-                Generated from <strong>{emailCount}</strong> email{emailCount !== 1 ? 's' : ''} between {new Date(startDate).toLocaleDateString()} and {new Date(endDate).toLocaleDateString()}
-                {fromGraphApi && (
-                  <span className="ml-1 text-blue-600 dark:text-blue-400 font-medium">
-                    (includes emails from Microsoft Graph API)
-                  </span>
-                )}
-              </div>
-              
-              {emailCount > 15 && (
-                <div className="mt-1 py-1 px-2 bg-amber-50 dark:bg-amber-900 rounded text-amber-700 dark:text-amber-300 text-xs">
-                  <span className="font-medium">Note:</span> Due to processing limits, only the 15 most recent emails were analyzed in detail, with metadata from all {emailCount} emails.
-                </div>
-              )}
-              
-              {clientEmails && clientEmails.length > 0 && (
-                <div className="mt-1 text-sm">
-                  Filtered for communication with: <span className="font-mono">{clientEmails.join(', ')}</span>
-                </div>
-              )}
-            </div>
+            {/* Report metadata section removed */}
           </div>
           
           <div className="flex justify-between">
