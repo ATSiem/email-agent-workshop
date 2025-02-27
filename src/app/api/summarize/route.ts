@@ -6,7 +6,7 @@ import { db } from "~/lib/db";
 import { clients } from "~/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getUserAccessToken, setUserAccessToken } from "~/lib/auth/microsoft";
-import { getComprehensiveEmails } from "~/lib/email/graph-fetcher";
+import { getClientEmails } from "~/lib/client-reports/email-fetcher";
 
 // Schema for the summarize request
 const summarizeRequestSchema = z.object({
@@ -93,8 +93,8 @@ export async function POST(request: Request) {
       }
     }
     
-    // Use our comprehensive email fetcher
-    console.log('Summarize API - Fetching comprehensive emails for date range:', 
+    // Use our client email fetcher
+    console.log('Summarize API - Fetching client emails for date range:', 
       data.startDate, 'to', data.endDate);
     
     // Ensure date strings are properly formatted ISO strings
@@ -127,7 +127,7 @@ export async function POST(request: Request) {
     let emailResult;
     try {
       // Use the normalized date strings for the query
-      emailResult = await getComprehensiveEmails({
+      emailResult = await getClientEmails({
         startDate: startDateIso,
         endDate: endDateIso,
         clientDomains: clientDomains,
@@ -193,33 +193,51 @@ export async function POST(request: Request) {
     
     let result;
     try {
-      // Limit the number of emails sent to AI to avoid hitting token limits
+      // Two-tier approach: use summaries for most emails, full content for only the most recent/important ones
       // Sort emails by date (newest first) to prioritize recent communications
       const sortedEmails = [...emails].sort((a, b) => 
         new Date(b.date).getTime() - new Date(a.date).getTime()
       );
       
-      // Take at most 15 emails to stay well within token limits
-      // Further limit email content length - truncate long emails
-      const MAX_EMAILS = 15; 
-      const MAX_BODY_LENGTH = 800; // Characters per email body
+      // Set limits based on email volume
+      const MAX_DETAILED_EMAILS = 15; // Emails to analyze in full detail
+      const MAX_SUMMARY_EMAILS = 50; // Additional emails to include just the summaries
+      const MAX_BODY_LENGTH = 600; // Characters per email body (reduced from 800)
       
-      const limitedEmails = sortedEmails
-        .slice(0, MAX_EMAILS)
+      // Split into two tiers:
+      // 1. Recent emails with truncated bodies for detailed analysis
+      // 2. Older emails with just metadata and summaries (no bodies)
+      const detailedEmails = sortedEmails
+        .slice(0, MAX_DETAILED_EMAILS)
         .map(email => ({
-          ...email,
+          id: email.id,
+          subject: email.subject,
+          from: email.from,
+          to: email.to,
+          date: email.date,
           // Truncate long email bodies to save tokens
           body: email.body && email.body.length > MAX_BODY_LENGTH 
             ? email.body.substring(0, MAX_BODY_LENGTH) + '... [truncated]' 
-            : email.body
+            : email.body,
+          summary: email.summary,
+          labels: email.labels
         }));
       
-      console.log(`Summarize API - Limiting analysis to ${limitedEmails.length} of ${emails.length} emails to stay within token limits`);
+      // For older emails, only include metadata and summaries without bodies
+      const summaryEmails = sortedEmails
+        .slice(MAX_DETAILED_EMAILS, MAX_DETAILED_EMAILS + MAX_SUMMARY_EMAILS)
+        .map(email => ({
+          id: email.id,
+          subject: email.subject,
+          from: email.from,
+          to: email.to,
+          date: email.date,
+          summary: email.summary,
+          labels: email.labels
+          // Intentionally omit body to save tokens
+        }));
       
-      // If we had to limit, add a note about it
-      const limitNote = limitedEmails.length < emails.length 
-        ? `\nNote: Due to large volume, this analysis focuses on the ${limitedEmails.length} most recent emails of ${emails.length} total.` 
-        : '';
+      console.log(`Summarize API - Using ${detailedEmails.length} emails for detailed analysis and ${summaryEmails.length} for summary analysis`);
       
       // Create a summary of all emails by day and most common subjects
       let emailMetadata = "";
@@ -232,11 +250,14 @@ export async function POST(request: Request) {
           emailsByDate[day].push(email);
         });
         
-        // Create a summary of emails per day
+        // Create a summary of emails per day (just top 10 days if there are many)
         emailMetadata = "Email distribution by date:\n";
-        Object.keys(emailsByDate).sort().forEach(date => {
-          emailMetadata += `- ${date}: ${emailsByDate[date].length} emails\n`;
-        });
+        Object.keys(emailsByDate)
+          .sort()
+          .slice(-10) // Only show last 10 days if there are many
+          .forEach(date => {
+            emailMetadata += `- ${date}: ${emailsByDate[date].length} emails\n`;
+          });
         
         // Count subject frequencies
         const subjectCount = {};
@@ -262,6 +283,7 @@ export async function POST(request: Request) {
         console.error('Summarize API - Error generating metadata:', err);
       }
       
+      // Build prompt with two-tier approach
       const prompt = `Generate a communication report based on these emails ${clientName ? `with ${clientName}` : ''}.
                 Use exactly this format template: "${data.format}"
                 
@@ -271,26 +293,28 @@ export async function POST(request: Request) {
                 Time period: ${new Date(data.startDate).toLocaleDateString()} to ${new Date(data.endDate).toLocaleDateString()}
                 ${clientDomains.length > 0 ? `Client domains: ${clientDomains.join(', ')}` : ''}
                 ${clientEmails.length > 0 ? `Client emails: ${clientEmails.join(', ')}` : ''}
-                ${limitNote}
                 
                 Total emails in period: ${emails.length}
                 ${emailMetadata}
                 
-                Detailed analysis of most recent ${limitedEmails.length} emails:
-                ${JSON.stringify(limitedEmails)}`;
+                ${detailedEmails.length < emails.length ? 
+                  `Note: Due to processing limits, only the ${detailedEmails.length} most recent emails were analyzed in detail, with metadata from all ${emails.length} emails.` : ''}
+                
+                TIER 1 - Detailed analysis of most recent ${detailedEmails.length} emails (including content):
+                ${JSON.stringify(detailedEmails)}
+                
+                ${summaryEmails.length > 0 ? 
+                  `TIER 2 - Summary of next ${summaryEmails.length} emails (metadata only):
+                   ${JSON.stringify(summaryEmails)}` : ''}`;
       
+      // Log diagnostic information about the prompt
       console.log('Summarize API - AI prompt length:', prompt.length);
-      console.log('Summarize API - AI prompt email count mentioned:', limitedEmails.length);
-      console.log('Summarize API - AI prompt snippet:', prompt.substring(0, 300) + '...');
+      console.log('Summarize API - Detailed emails:', detailedEmails.length);
+      console.log('Summarize API - Summary emails:', summaryEmails.length);
       
       // Calculate rough token estimate - 1 token ≈ 4 chars for English text
       const estimatedTokens = Math.ceil(prompt.length / 4);
       console.log(`Summarize API - Estimated tokens: ~${estimatedTokens}`);
-      
-      // If still potentially too large, add warning
-      if (estimatedTokens > 100000) {
-        console.log('Summarize API - WARNING: Prompt may still exceed token limits');
-      }
       
       result = await generateObject({
         // Use 128k context model with structured output

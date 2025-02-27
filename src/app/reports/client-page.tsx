@@ -48,13 +48,7 @@ export function ClientPage() {
     <div className="mx-auto mt-10 max-w-screen-lg">
       <div className="mb-6 flex justify-between items-center">
         <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold">Client Communication Reports</h1>
-          <Link 
-            href="/emails"
-            className="text-sm bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900 dark:text-blue-300 dark:hover:bg-blue-800 px-3 py-1 rounded-md"
-          >
-            See Email Summaries
-          </Link>
+          <h1 className="text-2xl font-bold">Client Reports</h1>
         </div>
         <div className="flex items-center gap-4">
           {/* Dark mode toggle */}
@@ -91,9 +85,6 @@ export function ClientPage() {
           </p>
           <div className="flex flex-col gap-4 items-center">
             <LoginButton />
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              You can also view your <Link href="/emails" className="text-blue-600 hover:text-blue-800 dark:text-blue-400 underline">email summaries</Link>
-            </p>
           </div>
         </div>
       ) : (

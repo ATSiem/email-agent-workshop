@@ -1,14 +1,8 @@
-# AI Email Assistant with Client Communication Reports
+# Client Communication Reports
 
-This application helps you manage your email communications by automatically processing incoming emails, summarizing them, and generating client-specific reports. It combines Next.js, TypeScript, the Vercel AI SDK, and SQLite to create a powerful AI agent for email management.
+This application helps you generate professional client communication reports by analyzing your email communications with clients. It combines Next.js, TypeScript, the Vercel AI SDK, and SQLite to create a powerful AI tool for client communication management.
 
 ## Features
-
-### Email Processing
-- Automatic email collection via webhook endpoint
-- AI-powered email summarization and labeling
-- Clean email display with signature removal
-- Threading support for related emails
 
 ### Client Management
 - Create and manage clients with their domains and email addresses

@@ -1,5 +1,5 @@
-import { redirect } from 'next/navigation';
+import { ClientPage } from './reports/client-page';
 
-export default function Page() {
-  redirect('/reports');
+export default function HomePage() {
+  return <ClientPage />;
 }

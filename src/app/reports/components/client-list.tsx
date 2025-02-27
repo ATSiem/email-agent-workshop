@@ -47,7 +47,9 @@ export function ClientList({ onSelectClient, id }: ClientListProps) {
       const response = await fetch('/api/clients', {
         headers: {
           'Authorization': `Bearer ${token}`
-        }
+        },
+        // Prevent caching issues
+        cache: 'no-store'
       });
       console.log('ClientList - Response status:', response.status);
       
@@ -89,7 +91,9 @@ export function ClientList({ onSelectClient, id }: ClientListProps) {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`
-        }
+        },
+        // Prevent caching issues
+        cache: 'no-store'
       });
       
       if (!response.ok) {

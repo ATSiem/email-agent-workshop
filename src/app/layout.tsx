@@ -11,8 +11,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Personal Email Agent",
-  description: "Email agent for personal use",
+  title: "Client Reports",
+  description: "Generate professional client communication reports",
+  // Add cache control headers to prevent caching of authentication state
+  other: {
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  }
 };
 
 export default function RootLayout({

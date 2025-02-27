@@ -504,7 +504,7 @@ This comment won't appear in the final report.
               <div className="pl-4 pt-2">
                 <p className="mb-1">Common placeholders include:</p>
                 <ul className="list-disc pl-5 space-y-1 mt-1">
-                  <li>{'{client_name}'} - Client's name</li>
+                  <li>{'{client_name}'} - Client&apos;s name</li>
                   <li>{'{date_range}'} - Period covered by the report</li>
                   <li>{'{summary}'} - Overall communication summary</li>
                   <li>{'{key_topics}'} - Main topics discussed</li>

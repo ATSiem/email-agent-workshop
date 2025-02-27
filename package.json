@@ -1,5 +1,5 @@
 {
-  "name": "email-agent",
+  "name": "client-reports",
   "version": "0.1.0",
   "private": true,
   "engines": {
@@ -25,7 +25,9 @@
     "better-sqlite3": "^9.4.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.39.3",
+    "eslint-config-next": "^15.1.7",
     "lucide-react": "^0.475.0",
+    "mailparser": "^3.7.2",
     "next": "15.1.7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -39,6 +41,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "drizzle-kit": "^0.30.4",
+    "eslint": "^9.21.0",
     "postcss": "^8",
     "prettier": "^3.4.2",
     "prettier-plugin-tailwindcss": "^0.6.11",
