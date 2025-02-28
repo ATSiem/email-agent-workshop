@@ -6,12 +6,19 @@ import { eq } from "drizzle-orm";
 import { getCurrentModelSpec } from "~/lib/ai/model-info";
 import { env } from "~/lib/env";
 
+// Initialize OpenAI - make sure API key is set
+if (!process.env.OPENAI_API_KEY) {
+  console.warn("Warning: OPENAI_API_KEY is not set in the environment");
+}
+
 // Constants
 const BATCH_SIZE = env.EMBEDDING_BATCH_SIZE;
 
 // Get embedding dimension from the model spec
 const embeddingModel = getCurrentModelSpec('embedding');
 const EMBEDDING_DIMENSION = embeddingModel.embeddingDimension || 1536; // Default to 1536 as fallback
+
+console.log(`EmailEmbeddings - Using model: ${embeddingModel.modelId}, dimension: ${EMBEDDING_DIMENSION}`)
 
 /**
  * Generate and store embeddings for emails that haven't been processed yet
@@ -80,7 +87,7 @@ export async function processEmailEmbeddings(limit = process.env.EMAIL_EMBEDDING
 }
 
 /**
- * Generate embedding for a single email
+ * Generate embedding for a single email using the OpenAI API directly
  */
 async function generateEmbedding(email: { id: string, subject: string, body: string, summary: string }) {
   try {
@@ -94,13 +101,27 @@ async function generateEmbedding(email: { id: string, subject: string, body: str
     // Truncate to avoid token limits (ada-002 has max 8191 tokens)
     const truncatedContent = content.slice(0, 6000);
     
-    // Generate embedding
-    const response = await openai(env.OPENAI_EMBEDDING_MODEL).embeddings({
-      input: truncatedContent,
-      dimensions: EMBEDDING_DIMENSION,
+    // Create API request directly with fetch
+    const response = await fetch('https://api.openai.com/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: env.OPENAI_EMBEDDING_MODEL,
+        input: truncatedContent,
+        dimensions: EMBEDDING_DIMENSION
+      })
     });
     
-    return response.data[0].embedding;
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`OpenAI API error: ${error}`);
+    }
+    
+    const result = await response.json();
+    return result.data[0].embedding;
   } catch (err) {
     console.error(`EmailEmbeddings - Error generating embedding for email ${email.id}:`, err);
     return null;
@@ -130,11 +151,15 @@ export async function findSimilarEmails(query: string, options: {
     const conditions = [];
     
     if (startDate) {
-      conditions.push(`date >= '${startDate}'`);
+      // ISO date string comparison for SQLite - ignore time part for now
+      const dateStr = startDate.split('T')[0];
+      conditions.push(`date >= '${dateStr}'`);
     }
     
     if (endDate) {
-      conditions.push(`date <= '${endDate}'`);
+      // ISO date string comparison for SQLite - ignore time part for now
+      const dateStr = endDate.split('T')[0];
+      conditions.push(`date <= '${dateStr}'`);
     }
     
     // Build domain and email conditions
@@ -156,14 +181,14 @@ export async function findSimilarEmails(query: string, options: {
     // Build the WHERE clause
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     
+    console.log("EmailEmbeddings - Vector search conditions:", whereClause);
+    
     // Execute vector similarity search using dot product
     // This requires embedding to be stored as properly formatted JSON arrays
     const query = `
-      SELECT id, subject, from, to, date, body, summary, labels,
-             json_array_length(json(embedding)) as embedding_dimension
+      SELECT id, subject, "from", "to", date, body, summary, labels, embedding
       FROM messages
       ${whereClause}
-      ORDER BY embedding_dimension ASC  -- Temporary sorting, will be refined with vector similarity
       LIMIT ?
     `;
     
@@ -186,6 +211,15 @@ export async function findSimilarEmails(query: string, options: {
     // Sort by similarity score
     scoredResults.sort((a, b) => b.similarity_score - a.similarity_score);
     
+    // Log the search results for debugging
+    console.log(`EmailEmbeddings - Found ${scoredResults.length} semantic matches for query "${query}"`);
+    if (scoredResults.length > 0) {
+      console.log("EmailEmbeddings - Top 3 matches:");
+      scoredResults.slice(0, 3).forEach((email, idx) => {
+        console.log(`  ${idx+1}. Subject: "${email.subject}" (score: ${email.similarity_score.toFixed(4)})`);
+      });
+    }
+    
     // Return top results
     return scoredResults.slice(0, limit);
   } catch (error) {
@@ -195,16 +229,31 @@ export async function findSimilarEmails(query: string, options: {
 }
 
 /**
- * Generate embedding for a search query
+ * Generate embedding for a search query using the OpenAI API directly
  */
 async function generateEmbeddingForQuery(query: string) {
   try {
-    const response = await openai(env.OPENAI_EMBEDDING_MODEL).embeddings({
-      input: query,
-      dimensions: EMBEDDING_DIMENSION,
+    // Create API request directly with fetch
+    const response = await fetch('https://api.openai.com/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: env.OPENAI_EMBEDDING_MODEL,
+        input: query,
+        dimensions: EMBEDDING_DIMENSION
+      })
     });
     
-    return response.data[0].embedding;
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`OpenAI API error: ${error}`);
+    }
+    
+    const result = await response.json();
+    return result.data[0].embedding;
   } catch (err) {
     console.error('EmailEmbeddings - Error generating embedding for query:', err);
     return null;

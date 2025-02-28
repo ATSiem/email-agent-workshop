@@ -31,21 +31,36 @@ export async function getClientEmails(params: EmailParams) {
     
     let dbEmails = [];
     
-    // If search query is provided and vector search is enabled, use semantic search
+    // Try both vector and SQL search when appropriate
+    let vectorEmails = [];
+    
+    // If search query is provided and vector search is enabled, try semantic search
     if (searchQuery && useVectorSearch) {
       console.log(`EmailFetcher - Using vector search for query: "${searchQuery}"`);
-      dbEmails = await findSimilarEmails(searchQuery, {
-        limit: maxResults,
-        startDate,
-        endDate,
-        clientDomains,
-        clientEmails
-      });
-      console.log(`EmailFetcher - Found ${dbEmails.length} emails via vector search`);
+      try {
+        vectorEmails = await findSimilarEmails(searchQuery, {
+          limit: maxResults,
+          startDate,
+          endDate,
+          clientDomains,
+          clientEmails
+        });
+        console.log(`EmailFetcher - Found ${vectorEmails.length} emails via vector search`);
+      } catch (error) {
+        console.error("EmailFetcher - Vector search error:", error);
+        // Continue with traditional search if vector search fails
+      }
+    }
+    
+    // Always perform traditional SQL search
+    const sqlEmails = await getClientEmailsFromDatabase(params);
+    console.log(`EmailFetcher - Found ${sqlEmails.length} emails via SQL search`);
+    
+    // Use vector search results if available and not empty, otherwise fall back to SQL results
+    if (searchQuery && useVectorSearch && vectorEmails.length > 0) {
+      dbEmails = vectorEmails;
     } else {
-      // Use traditional SQL search
-      dbEmails = await getClientEmailsFromDatabase(params);
-      console.log(`EmailFetcher - Found ${dbEmails.length} emails via SQL search`);
+      dbEmails = sqlEmails;
     }
     
     // Queue a background task to process any new emails
@@ -110,11 +125,21 @@ export async function getClientEmails(params: EmailParams) {
 // Function to get client emails from database using SQL
 async function getClientEmailsFromDatabase(params: EmailParams) {
   try {
-    const { startDate, endDate, clientDomains = [], clientEmails = [], maxResults = 100 } = params;
+    const { 
+      startDate, 
+      endDate, 
+      clientDomains = [], 
+      clientEmails = [], 
+      maxResults = 100,
+      searchQuery = ""  // Add support for standard keyword search
+    } = params;
     
     console.log('EmailFetcher - Fetching from database with date range:');
     console.log(`  - Start date: ${startDate}`);
     console.log(`  - End date: ${endDate}`);
+    if (searchQuery) {
+      console.log(`  - Search query: "${searchQuery}"`);
+    }
     
     // First, get the user's own email
     // For the database, we need to get it from the Graph API first
@@ -135,12 +160,27 @@ async function getClientEmailsFromDatabase(params: EmailParams) {
     const conditions = [];
     const queryParams = [];
     
-    // Add date range parameters
-    conditions.push("date >= ?");
-    queryParams.push(startDate);
+    // Add date range parameters - convert ISO strings to just the date part
+    if (startDate) {
+      const dateStr = new Date(startDate).toISOString().split('T')[0];
+      conditions.push("date >= ?");
+      queryParams.push(dateStr);
+    }
     
-    conditions.push("date <= ?");
-    queryParams.push(endDate);
+    if (endDate) {
+      const dateStr = new Date(endDate).toISOString().split('T')[0];
+      conditions.push("date <= ?");
+      queryParams.push(dateStr);
+    }
+    
+    // Add search term if provided (for standard non-vector search)
+    if (searchQuery && searchQuery.trim()) {
+      // Search in subject and body
+      conditions.push("(subject LIKE ? OR body LIKE ?)");
+      const searchTerm = `%${searchQuery}%`;
+      queryParams.push(searchTerm);
+      queryParams.push(searchTerm);
+    }
     
     // Improved filtering logic when we have the user's email
     if (userEmail && (clientDomains.length > 0 || clientEmails.length > 0)) {
@@ -205,18 +245,19 @@ async function getClientEmailsFromDatabase(params: EmailParams) {
     }
     
     // Combine all conditions
-    const whereClause = conditions.join(' AND ');
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     
     // Query the database for client emails
     const query = `
       SELECT * FROM messages 
-      WHERE ${whereClause}
+      ${whereClause}
       ORDER BY date DESC
       LIMIT ?
     `;
     
     queryParams.push(maxResults);
     
+    console.log('EmailFetcher - Database query:', query);
     console.log('EmailFetcher - Database query params:', queryParams);
     
     const stmt = db.connection.prepare(query);
@@ -341,6 +382,79 @@ async function getClientEmailsFromGraph(params: EmailParams) {
         attachments: JSON.stringify([])
       };
     });
+    
+    // Save emails to database
+    try {
+      console.log(`EmailFetcher - Attempting to save ${emails.length} emails to database`);
+      
+      // Log database schema for debugging
+      try {
+        const tableInfoStmt = db.connection.prepare('PRAGMA table_info(messages)');
+        const tableInfo = tableInfoStmt.all();
+        console.log('EmailFetcher - Database schema for messages table:', tableInfo);
+      } catch (schemaError) {
+        console.error('EmailFetcher - Error fetching schema:', schemaError);
+      }
+      
+      const savedEmails = [];
+      for (const email of emails) {
+        try {
+          // Check if email already exists in database
+          const existingStmt = db.connection.prepare('SELECT id FROM messages WHERE id = ?');
+          const existing = existingStmt.get(email.id);
+          
+          if (!existing) {
+            // Insert email into database
+            // SQLite requires quotes around column names that are keywords
+            const insertStmt = db.connection.prepare(`
+              INSERT INTO messages (
+                id, subject, "from", "to", date, body, 
+                attachments, summary, labels, processed_for_vector
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            `);
+            
+            insertStmt.run(
+              email.id,
+              email.subject,
+              email.from,
+              email.to,
+              email.date,
+              email.body,
+              email.attachments,
+              email.summary,
+              email.labels
+            );
+            
+            console.log(`EmailFetcher - Saved email with ID ${email.id} to database`);
+            savedEmails.push(email.id);
+          } else {
+            console.log(`EmailFetcher - Email ${email.id} already exists in database`);
+          }
+        } catch (singleEmailError) {
+          console.error(`EmailFetcher - Error saving email ${email.id}:`, singleEmailError);
+          console.error(`EmailFetcher - Email data:`, JSON.stringify({
+            id: email.id,
+            subject: email.subject,
+            from: email.from,
+            to: email.to,
+            date: email.date?.substring(0, 30) + '...',
+          }));
+        }
+      }
+      
+      if (savedEmails.length > 0) {
+        console.log(`EmailFetcher - Saved ${savedEmails.length} new emails to database`);
+        // Queue background processing for these specific emails
+        queueBackgroundTask('process_new_emails', { 
+          emailIds: savedEmails,
+          priority: 'high'
+        });
+      } else {
+        console.log('EmailFetcher - No new emails to save to database');
+      }
+    } catch (dbError) {
+      console.error('EmailFetcher - Error saving emails to database:', dbError);
+    }
     
     return emails;
   } catch (error) {

@@ -91,7 +91,10 @@ async function processNextTask() {
         break;
         
       case 'process_new_emails':
-        result = await processNewEmails(task.params.limit || 20);
+        result = await processNewEmails(
+          task.params.limit || 20, 
+          task.params.emailIds || undefined
+        );
         break;
         
       default:
@@ -181,21 +184,71 @@ async function processPendingSummaries(limit = 20) {
 /**
  * Process new emails (both summary and embeddings)
  */
-async function processNewEmails(limit = 20) {
+async function processNewEmails(limit = 20, emailIds?: string[]) {
   try {
-    console.log('BackgroundProcessor - Processing new emails');
+    console.log('BackgroundProcessor - Processing new emails', 
+      emailIds ? `(specific IDs: ${emailIds.length})` : `(limit: ${limit})`);
     
-    // First, generate summaries for emails that need them
-    const summaryResult = await processPendingSummaries(limit);
-    
-    // Then, generate embeddings for emails that need them
-    const embeddingResult = await processEmailEmbeddings(limit);
-    
-    return {
-      success: true,
-      summaries: summaryResult,
-      embeddings: embeddingResult
-    };
+    if (emailIds && emailIds.length > 0) {
+      // Process specific emails by IDs
+      console.log(`BackgroundProcessor - Processing specific emails: ${emailIds.slice(0, 3).join(', ')}${emailIds.length > 3 ? '...' : ''}`);
+      
+      // Generate summaries for these specific emails
+      for (const emailId of emailIds) {
+        try {
+          // Check if the email needs a summary
+          const emailStmt = db.connection.prepare(`
+            SELECT id, subject, "from", "to", date, body
+            FROM messages
+            WHERE id = ? AND (summary IS NULL OR summary = '')
+          `);
+          
+          const email = emailStmt.get(emailId);
+          
+          if (email) {
+            // Generate and save summary
+            const summary = await generateEmailSummary(email);
+            
+            if (summary) {
+              const updateStmt = db.connection.prepare(`
+                UPDATE messages
+                SET summary = ?, updated_at = unixepoch()
+                WHERE id = ?
+              `);
+              
+              updateStmt.run(summary, emailId);
+              console.log(`BackgroundProcessor - Generated summary for email ${emailId}`);
+            }
+          }
+        } catch (err) {
+          console.error(`BackgroundProcessor - Error processing specific email ${emailId}:`, err);
+        }
+      }
+      
+      // Generate embeddings using the existing process
+      // The processEmailEmbeddings function will pick up these emails
+      // in its next batch since they're marked as needing processing
+      const embeddingResult = await processEmailEmbeddings(Math.min(emailIds.length, limit));
+      
+      return {
+        success: true,
+        processedIds: emailIds,
+        embeddings: embeddingResult
+      };
+    } else {
+      // Standard processing using the limit
+      // First, generate summaries for emails that need them
+      const summaryResult = await processPendingSummaries(limit);
+      
+      // Then, generate embeddings for emails that need them
+      const embeddingResult = await processEmailEmbeddings(limit);
+      
+      return {
+        success: true,
+        summaries: summaryResult,
+        embeddings: embeddingResult
+      };
+    }
   } catch (error) {
     console.error('BackgroundProcessor - Error processing new emails:', error);
     return { success: false, error: String(error) };

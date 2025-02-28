@@ -578,7 +578,7 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
               <div className="flex flex-col space-y-2">
                 <div className="flex items-center space-x-3">
                   <label htmlFor="searchQuery" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Semantic Search (Optional)
+                    Search Filter (Optional)
                   </label>
                   <label className="flex items-center space-x-2 cursor-pointer group relative">
                     <input
@@ -587,9 +587,9 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
                       onChange={(e) => setUseVectorSearch(e.target.checked)}
                       className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                     />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">Enable vector search</span>
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Use AI search</span>
                     <div className="absolute bottom-full left-0 mb-2 w-72 p-2 bg-gray-800 text-white text-xs rounded shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity z-10">
-                      Uses AI embeddings to find semantically similar emails. Requires text in the search field below to work. Without a search query, regular filtering will be used.
+                      AI search uses advanced technology to find related concepts, not just exact keyword matches. For example, searching for "pricing" could find discussions about "cost", "budget", or "financial considerations".
                     </div>
                   </label>
                 </div>
@@ -599,12 +599,12 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                  placeholder={useVectorSearch ? "Search for concepts, themes, or topics (vector search enabled)" : "Search for specific topics or themes"}
+                  placeholder={useVectorSearch ? "Enter search terms (AI will find related concepts)" : "Enter keywords to filter emails"}
                 />
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   {useVectorSearch 
-                    ? "With vector search enabled, the system will find semantically similar emails even if they don't contain your exact keywords."
-                    : "Enter topics or themes to find relevant emails. Enable vector search for semantic matching."}
+                    ? "AI search finds semantically related emails, even without exact keyword matches (e.g., searching for 'pricing' will find 'budget', 'cost', etc.)"
+                    : "Standard search finds emails containing your exact keywords. Enable AI search for more comprehensive results."}
                 </p>
               </div>
             </div>
