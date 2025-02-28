@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useImperativeHandle, forwardRef, useRef } from 'react';
+import React, { useState, useEffect, useImperativeHandle, forwardRef, useRef, useCallback } from 'react';
 import { getUserAccessToken } from '~/lib/auth/microsoft';
 
 interface Client {
@@ -19,18 +19,12 @@ export function ClientList({ onSelectClient, id }: ClientListProps) {
   // Add a ref to expose methods to the parent
   const ref = useRef<HTMLDivElement>(null);
   
-  // Expose the refresh method through DOM for parent access
-  useEffect(() => {
-    if (ref.current && id) {
-      // Add refreshClients method to the DOM element
-      (ref.current as any).refreshClients = fetchClients;
-    }
-  }, []);
   const [clients, setClients] = useState<Client[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   
-  async function fetchClients() {
+  // Define fetchClients with useCallback to avoid recreating on every render
+  const fetchClients = useCallback(async () => {
     try {
       setIsLoading(true);
       setError('');
@@ -67,11 +61,20 @@ export function ClientList({ onSelectClient, id }: ClientListProps) {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, []);
   
+  // Fetch clients on component mount
   useEffect(() => {
     fetchClients();
-  }, []);
+  }, [fetchClients]);
+  
+  // Expose the refresh method through DOM for parent access
+  useEffect(() => {
+    if (ref.current && id) {
+      // Add refreshClients method to the DOM element
+      (ref.current as any).refreshClients = fetchClients;
+    }
+  }, [id, fetchClients]);
   
   async function handleDeleteClient(clientId: string) {
     if (!confirm('Are you sure you want to delete this client? This will also delete any associated templates.')) {

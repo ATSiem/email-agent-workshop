@@ -570,7 +570,7 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
                 placeholder="Provide examples or specific instructions for how to identify strategy changes or what to focus on in communications"
               />
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Add examples of what you're looking for or specific instructions to enhance report quality
+                Add examples of what you&apos;re looking for or specific instructions to enhance report quality
               </p>
             </div>
 

@@ -116,6 +116,21 @@ async function getClientEmailsFromDatabase(params: EmailParams) {
     console.log(`  - Start date: ${startDate}`);
     console.log(`  - End date: ${endDate}`);
     
+    // First, get the user's own email
+    // For the database, we need to get it from the Graph API first
+    let userEmail = '';
+    try {
+      const client = getGraphClient();
+      if (client) {
+        const userInfo = await client.api('/me').select('mail,userPrincipalName').get();
+        userEmail = userInfo.mail || userInfo.userPrincipalName || '';
+        console.log(`EmailFetcher - User email for database query: ${userEmail}`);
+      }
+    } catch (error) {
+      console.error('EmailFetcher - Error getting user email for database query:', error);
+      // Continue with empty userEmail - will fall back to old behavior
+    }
+    
     // Using parameterized queries for better security
     const conditions = [];
     const queryParams = [];
@@ -127,26 +142,66 @@ async function getClientEmailsFromDatabase(params: EmailParams) {
     conditions.push("date <= ?");
     queryParams.push(endDate);
     
-    // Add domain and email conditions
-    const clientFilters = [];
-    
-    // Add domain conditions
-    for (const domain of clientDomains) {
-      clientFilters.push(`("from" LIKE ? OR "to" LIKE ?)`);
-      queryParams.push(`%@${domain}`);
-      queryParams.push(`%@${domain}`);
-    }
-    
-    // Add email conditions
-    for (const email of clientEmails) {
-      clientFilters.push(`("from" = ? OR "to" = ?)`);
-      queryParams.push(email);
-      queryParams.push(email);
-    }
-    
-    // Combine client filters
-    if (clientFilters.length > 0) {
-      conditions.push(`(${clientFilters.join(' OR ')})`);
+    // Improved filtering logic when we have the user's email
+    if (userEmail && (clientDomains.length > 0 || clientEmails.length > 0)) {
+      const clientFilters = [];
+      
+      // Case 1: Email from user to client
+      // For each client domain
+      for (const domain of clientDomains) {
+        clientFilters.push(`("from" = ? AND "to" LIKE ?)`);
+        queryParams.push(userEmail);
+        queryParams.push(`%@${domain}`);
+      }
+      
+      // For each client email
+      for (const email of clientEmails) {
+        clientFilters.push(`("from" = ? AND "to" = ?)`);
+        queryParams.push(userEmail);
+        queryParams.push(email);
+      }
+      
+      // Case 2: Email from client to user
+      // For each client domain
+      for (const domain of clientDomains) {
+        clientFilters.push(`("from" LIKE ? AND "to" = ?)`);
+        queryParams.push(`%@${domain}`);
+        queryParams.push(userEmail);
+      }
+      
+      // For each client email
+      for (const email of clientEmails) {
+        clientFilters.push(`("from" = ? AND "to" = ?)`);
+        queryParams.push(email);
+        queryParams.push(userEmail);
+      }
+      
+      // Combine client filters
+      if (clientFilters.length > 0) {
+        conditions.push(`(${clientFilters.join(' OR ')})`);
+      }
+    } else {
+      // Fallback to original behavior if we don't have the user's email
+      const clientFilters = [];
+      
+      // Add domain conditions
+      for (const domain of clientDomains) {
+        clientFilters.push(`("from" LIKE ? OR "to" LIKE ?)`);
+        queryParams.push(`%@${domain}`);
+        queryParams.push(`%@${domain}`);
+      }
+      
+      // Add email conditions
+      for (const email of clientEmails) {
+        clientFilters.push(`("from" = ? OR "to" = ?)`);
+        queryParams.push(email);
+        queryParams.push(email);
+      }
+      
+      // Combine client filters
+      if (clientFilters.length > 0) {
+        conditions.push(`(${clientFilters.join(' OR ')})`);
+      }
     }
     
     // Combine all conditions
@@ -197,10 +252,21 @@ async function getClientEmailsFromGraph(params: EmailParams) {
       return [];
     }
     
+    // First get the current user's email address
+    const userInfo = await client.api('/me').select('mail,userPrincipalName').get();
+    const userEmail = userInfo.mail || userInfo.userPrincipalName || '';
+    
+    if (!userEmail) {
+      console.log('EmailFetcher - Could not determine user email');
+      return [];
+    }
+    
+    console.log(`EmailFetcher - User email identified as: ${userEmail}`);
+    
     // Query Graph API
     const graphResult = await client
       .api('/me/messages')
-      .select('id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,hasAttachments')
+      .select('id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,hasAttachments')
       .filter(filterParts.join(' and '))
       .top(maxResults)
       .orderby('receivedDateTime desc')
@@ -211,25 +277,46 @@ async function getClientEmailsFromGraph(params: EmailParams) {
       return [];
     }
     
-    // Filter results by client domains/emails
+    // Filter results by client domains/emails with improved logic
     let filteredResults = graphResult.value;
     
     if (clientDomains.length > 0 || clientEmails.length > 0) {
       filteredResults = graphResult.value.filter(message => {
         const fromEmail = message.from?.emailAddress?.address || '';
-        const toEmail = message.toRecipients?.[0]?.emailAddress?.address || '';
+        const toRecipients = message.toRecipients?.map(r => r.emailAddress?.address || '') || [];
+        const ccRecipients = message.ccRecipients?.map(r => r.emailAddress?.address || '') || [];
+        const allRecipients = [...toRecipients, ...ccRecipients];
         
-        // Check if email matches client domains
-        const matchesDomain = clientDomains.some(domain => 
-          fromEmail.endsWith(`@${domain}`) || toEmail.endsWith(`@${domain}`)
-        );
+        // Determine if this is a client email based on the fixed logic:
         
-        // Check if email matches client emails
-        const matchesEmail = clientEmails.some(email => 
-          fromEmail === email || toEmail === email
-        );
+        // Case 1: Email from user to client
+        const isFromUserToClient = 
+          fromEmail === userEmail && 
+          (
+            clientEmails.some(email => toRecipients.includes(email)) ||
+            clientDomains.some(domain => toRecipients.some(recipient => recipient.endsWith(`@${domain}`)))
+          );
         
-        return matchesDomain || matchesEmail;
+        // Case 2: Email from client to user
+        const isFromClientToUser = 
+          toRecipients.includes(userEmail) &&
+          (
+            clientEmails.includes(fromEmail) ||
+            clientDomains.some(domain => fromEmail.endsWith(`@${domain}`))
+          );
+        
+        // Case 3 (to exclude): Both user and client are recipients but from someone else (newsletters, notifications)
+        const isNewsletter = 
+          allRecipients.includes(userEmail) && 
+          (
+            clientEmails.some(email => allRecipients.includes(email)) ||
+            clientDomains.some(domain => allRecipients.some(recipient => recipient.endsWith(`@${domain}`)))
+          ) &&
+          !isFromUserToClient && 
+          !isFromClientToUser;
+        
+        // Include only case 1 and 2, exclude newsletters/notifications (case 3)
+        return isFromUserToClient || isFromClientToUser;
       });
     }
     

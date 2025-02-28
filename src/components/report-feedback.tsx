@@ -88,7 +88,28 @@ export function ReportFeedback({
           onClose();
         }, 2000);
       } else {
-        console.error('Error submitting feedback:', await response.json());
+        // Log the response status
+        console.error(`Error submitting feedback: ${response.status} ${response.statusText}`);
+        
+        // Try to get response text instead of JSON
+        try {
+          const errorText = await response.text();
+          if (errorText) {
+            console.error('Error response:', errorText);
+            // Try to parse as JSON if it looks like JSON
+            if (errorText.startsWith('{') || errorText.startsWith('[')) {
+              try {
+                const errorData = JSON.parse(errorText);
+                console.error('Parsed error data:', errorData);
+              } catch (e) {
+                // Not valid JSON, already logged as text
+              }
+            }
+          }
+        } catch (textError) {
+          console.error('Could not read error response');
+        }
+        
         alert('There was an error submitting your feedback. We still appreciate your input!');
         // Still mark as submitted so user doesn't get stuck
         setSubmitted(true);

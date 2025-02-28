@@ -55,6 +55,26 @@ if (typeof window === 'undefined') {
         updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
         FOREIGN KEY (client_id) REFERENCES clients(id)
       );
+      
+      CREATE TABLE IF NOT EXISTS report_feedback (
+        id TEXT PRIMARY KEY,
+        report_id TEXT NOT NULL,
+        client_id TEXT,
+        rating INTEGER,
+        feedback_text TEXT,
+        actions_taken TEXT,
+        start_date TEXT,
+        end_date TEXT,
+        vector_search_used INTEGER,
+        search_query TEXT,
+        email_count INTEGER,
+        copied_to_clipboard INTEGER,
+        generation_time_ms INTEGER,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        user_agent TEXT,
+        ip_address TEXT,
+        FOREIGN KEY (client_id) REFERENCES clients(id)
+      );
     `);
     
     db = drizzle(sqlite, { schema });
