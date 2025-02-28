@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { getUserAccessToken } from '~/lib/auth/microsoft';
+import { ReportFeedback } from '~/components/report-feedback';
 
 interface Client {
   id: string;
@@ -59,6 +60,8 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
   const [endDate, setEndDate] = useState('');
   const [saveName, setSaveName] = useState('');
   const [examplePrompt, setExamplePrompt] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [useVectorSearch, setUseVectorSearch] = useState(false);
   
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedReport, setGeneratedReport] = useState<string | null>(null);
@@ -67,6 +70,12 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
   const [fromGraphApi, setFromGraphApi] = useState(false);
   const [clientEmails, setClientEmails] = useState<string[]>([]);
   const [error, setError] = useState('');
+  
+  // Feedback-related states
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [reportId, setReportId] = useState<string>('');
+  const [generationTimeMs, setGenerationTimeMs] = useState<number>(0);
+  const [clipboardCopied, setClipboardCopied] = useState(false);
   
   // Set default date range (current week starting from Monday)
   useEffect(() => {
@@ -230,6 +239,15 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
     e.preventDefault();
     setError('');
     setGeneratedReport(null);
+    setReportId('');
+    setGenerationTimeMs(0);
+    setClipboardCopied(false);
+    
+    // Generate a unique ID for this report generation
+    const newReportId = crypto.randomUUID();
+    setReportId(newReportId);
+    
+    const startTime = performance.now();
     
     try {
       if (!selectedClientId) {
@@ -295,8 +313,15 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
           clientId: selectedClientId,
           saveName: saveName || "",
           examplePrompt: examplePrompt || "",
+          searchQuery: searchQuery || undefined,
+          useVectorSearch: useVectorSearch,
+          reportId: newReportId, // Include the report ID for tracking
         }),
       });
+      
+      const endTime = performance.now();
+      const totalTime = Math.round(endTime - startTime);
+      setGenerationTimeMs(totalTime);
       
       const data = await response.json();
       console.log('ReportGenerator - Response received with status:', response.status);
@@ -318,6 +343,11 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
         setFromGraphApi(false);
       }
       
+      // Show feedback prompt after 10 seconds to allow user to read the report
+      setTimeout(() => {
+        setShowFeedback(true);
+      }, 10000);
+      
       if (onReportGenerated) {
         onReportGenerated();
       }
@@ -332,6 +362,22 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
       <h2 className="text-xl font-medium mb-6 dark:text-white">Generate Client Report</h2>
+      
+      {/* Feedback popup when shown */}
+      {showFeedback && generatedReport && (
+        <ReportFeedback
+          reportId={reportId}
+          clientId={selectedClientId}
+          onClose={() => setShowFeedback(false)}
+          reportParameters={{
+            startDate,
+            endDate,
+            vectorSearchUsed: useVectorSearch,
+            searchQuery: searchQuery || undefined,
+            emailCount,
+          }}
+        />
+      )}
       
       {error && (
         <div className="mb-6 p-4 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 rounded-md text-sm">
@@ -374,6 +420,23 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
               onClick={() => {
                 // Copy to clipboard
                 navigator.clipboard.writeText(generatedReport);
+                setClipboardCopied(true);
+                
+                // Track clipboard copy in feedback data
+                fetch('/api/feedback/action', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    reportId,
+                    action: 'clipboard_copy',
+                    timestamp: new Date().toISOString(),
+                  }),
+                }).catch(error => {
+                  console.error('Error logging clipboard action:', error);
+                });
+                
                 alert('Report copied to clipboard');
               }}
               className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:bg-blue-500 dark:hover:bg-blue-600"
@@ -509,6 +572,41 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
                 Add examples of what you're looking for or specific instructions to enhance report quality
               </p>
+            </div>
+
+            <div>
+              <div className="flex flex-col space-y-2">
+                <div className="flex items-center space-x-3">
+                  <label htmlFor="searchQuery" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Semantic Search (Optional)
+                  </label>
+                  <label className="flex items-center space-x-2 cursor-pointer group relative">
+                    <input
+                      type="checkbox"
+                      checked={useVectorSearch}
+                      onChange={(e) => setUseVectorSearch(e.target.checked)}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Enable vector search</span>
+                    <div className="absolute bottom-full left-0 mb-2 w-72 p-2 bg-gray-800 text-white text-xs rounded shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity z-10">
+                      Uses AI embeddings to find semantically similar emails. Requires text in the search field below to work. Without a search query, regular filtering will be used.
+                    </div>
+                  </label>
+                </div>
+                <input
+                  type="text"
+                  id="searchQuery"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                  placeholder={useVectorSearch ? "Search for concepts, themes, or topics (vector search enabled)" : "Search for specific topics or themes"}
+                />
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {useVectorSearch 
+                    ? "With vector search enabled, the system will find semantically similar emails even if they don't contain your exact keywords."
+                    : "Enter topics or themes to find relevant emails. Enable vector search for semantic matching."}
+                </p>
+              </div>
             </div>
             
             <div>

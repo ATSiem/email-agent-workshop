@@ -49,3 +49,29 @@ export const reportTemplates = sqliteTable("report_templates", {
   // Track examples provided for this template
   examplePrompt: text("example_prompt"),
 });
+
+// Feedback and evaluation data
+export const reportFeedback = sqliteTable("report_feedback", {
+  id: text("id").primaryKey(),
+  reportId: text("report_id").notNull(),
+  clientId: text("client_id").references(() => clients.id),
+  rating: integer("rating"), // 1-5 rating
+  feedbackText: text("feedback_text"),
+  actionsTaken: text("actions_taken"), // JSON array of actions
+  // Report generation parameters
+  startDate: text("start_date"),
+  endDate: text("end_date"),
+  vectorSearchUsed: integer("vector_search_used"), // Boolean as integer
+  searchQuery: text("search_query"),
+  emailCount: integer("email_count"),
+  // User interaction telemetry
+  copiedToClipboard: integer("copied_to_clipboard"), // Boolean as integer
+  generationTimeMs: integer("generation_time_ms"),
+  // Tracking
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  // Analytics
+  userAgent: text("user_agent"),
+  ipAddress: text("ip_address"),
+});

@@ -51,7 +51,29 @@ Emails are fetched from two sources:
 1. Microsoft Graph API - directly fetches emails from your Microsoft account
 2. Webhook endpoint - can be connected to other email services like Gmail using external scripts
 
-The system validates, processes, and stores these emails with AI-generated summaries and labels using a two-tier approach for efficiency.
+The system validates, processes, and stores these emails with AI-generated summaries and labels using a dynamic approach for efficiency.
+
+### Email Processing Configuration
+The application uses smart, model-aware limits to process emails optimally:
+
+- **Model-based Dynamic Sizing**: Automatically adjusts processing based on the AI model's context window
+- **Adaptive Content Analysis**: Allocates more tokens to important/recent emails and less to older ones
+- **Token Budget Optimization**: Calculates exact limits based on current model's capabilities
+
+#### Model Selection and Configuration
+- **Model Selection**: Control which AI models to use for different tasks:
+  - `OPENAI_SUMMARY_MODEL`: Model for email summarization (default: gpt-3.5-turbo)
+  - `OPENAI_REPORT_MODEL`: Model for generating reports (default: gpt-4o-2024-08-06)
+  - `OPENAI_EMBEDDING_MODEL`: Model for vector embeddings (default: text-embedding-3-small)
+  
+- **Dynamic Limits**: Enable/disable dynamic calculation:
+  - `USE_DYNAMIC_MODEL_LIMITS`: Set to "true" to use model-aware limits (default: true)
+
+- **Configurable Fallback Limits**: Override defaults when needed:
+  - `EMAIL_FETCH_LIMIT`: Maximum emails to fetch (default: 1000)
+  - `EMAIL_PROCESSING_BATCH_SIZE`: Emails to process in background tasks (default: 200)
+  - `EMAIL_EMBEDDING_BATCH_SIZE`: Emails to create embeddings for (default: 200)
+  - `EMBEDDING_BATCH_SIZE`: Batch size for embedding processing (default: 20)
 
 ### Client Reports
 The application analyzes emails related to specific clients and generates comprehensive reports that summarize communications, highlight key topics, identify action items, and more. Reports are fully customizable with templates that support any placeholder fields you define. The processing happens in two stages:

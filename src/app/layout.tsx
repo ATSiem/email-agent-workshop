@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "../styles/global.css";
 import { AuthProvider } from "~/components/auth-provider";
+import { BackgroundProcessorInit } from "~/components/background-processor-init";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 
@@ -31,6 +32,7 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <AuthProvider>
+          <BackgroundProcessorInit />
           {children}
         </AuthProvider>
       </body>

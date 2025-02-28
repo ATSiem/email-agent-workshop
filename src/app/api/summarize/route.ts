@@ -7,6 +7,8 @@ import { clients } from "~/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { getUserAccessToken, setUserAccessToken } from "~/lib/auth/microsoft";
 import { getClientEmails } from "~/lib/client-reports/email-fetcher";
+import { calculateEmailProcessingParams } from "~/lib/ai/model-info";
+import { env } from "~/lib/env";
 
 // Schema for the summarize request
 const summarizeRequestSchema = z.object({
@@ -18,6 +20,8 @@ const summarizeRequestSchema = z.object({
   clientId: z.string().optional(),
   saveName: z.string().nullable().optional(), // Optional name to save this template
   examplePrompt: z.string().nullable().optional(), // Optional examples/instructions for the template
+  searchQuery: z.string().optional(), // Optional semantic search query
+  useVectorSearch: z.boolean().optional(), // Whether to use vector search
 });
 
 export async function POST(request: Request) {
@@ -128,12 +132,18 @@ export async function POST(request: Request) {
     let emailResult;
     try {
       // Use the normalized date strings for the query
+      // Get environment variable for max emails or use a sensible default
+      const maxFetchLimit = env.EMAIL_FETCH_LIMIT ? 
+        parseInt(String(env.EMAIL_FETCH_LIMIT)) : 1000; // Default to 1000 if not specified
+        
       emailResult = await getClientEmails({
         startDate: startDateIso,
         endDate: endDateIso,
         clientDomains: clientDomains,
         clientEmails: clientEmails,
-        maxResults: 500 // Increased from 100 to fetch more emails
+        maxResults: maxFetchLimit,
+        searchQuery: data.searchQuery,
+        useVectorSearch: data.useVectorSearch || false
       });
       
       // Check if we have emails
@@ -196,14 +206,69 @@ export async function POST(request: Request) {
     try {
       // Two-tier approach: use summaries for most emails, full content for only the most recent/important ones
       // Sort emails by date (newest first) to prioritize recent communications
-      const sortedEmails = [...emails].sort((a, b) => 
-        new Date(b.date).getTime() - new Date(a.date).getTime()
-      );
+      const sortedEmails = [...emails].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       
-      // Set limits based on email volume
-      const MAX_DETAILED_EMAILS = 15; // Emails to analyze in full detail
-      const MAX_SUMMARY_EMAILS = 50; // Additional emails to include just the summaries
-      const MAX_BODY_LENGTH = 600; // Characters per email body (reduced from 800)
+      // Initialize variables for email processing parameters
+      let MAX_DETAILED_EMAILS = 0;
+      let MAX_SUMMARY_EMAILS = 0;
+      let MAX_BODY_LENGTH = 0;
+      let modelInfo = "";
+      
+      // Get total email count
+      const totalEmails = emails.length;
+      
+      try {
+        // Determine whether to use dynamic model-based limits or static limits
+        if (env.USE_DYNAMIC_MODEL_LIMITS) {
+          // Use the model's context window to calculate optimal parameters
+          const params = calculateEmailProcessingParams(totalEmails, 4000);
+          
+          // Extract the calculated values
+          MAX_DETAILED_EMAILS = params.detailedEmailCount;
+          MAX_SUMMARY_EMAILS = params.summaryEmailCount;
+          MAX_BODY_LENGTH = params.maxBodyLength;
+          
+          // Add model information for logging
+          modelInfo = `Using dynamic limits based on ${params.model} with ${params.contextWindow} context window. ` +
+            `Will process ${params.detailedEmailCount} emails in detail and ${params.summaryEmailCount} with summaries only. ` +
+            `This covers ${params.percentageProcessed.toFixed(1)}% of all emails in this period.`;
+          
+          console.log('Summarize API - Using model-based parameters:', JSON.stringify(params));
+        } else {
+          // Fallback to standard percentage-based calculation
+          const percentForDetailed = 0.3; // 30% for full content
+          const percentForSummary = 0.6;  // 60% for summaries only
+          
+          // Calculate limits with reasonable maximums
+          MAX_DETAILED_EMAILS = Math.min(Math.ceil(totalEmails * percentForDetailed), 30);
+          MAX_SUMMARY_EMAILS = Math.min(Math.ceil(totalEmails * percentForSummary), 100);
+          
+          // Calculate maximum body length based on email count
+          const baseCharPerEmail = 10000;
+          const totalCharBudget = 1000000;
+          
+          MAX_BODY_LENGTH = Math.max(
+            Math.min(
+              Math.floor(totalCharBudget / (MAX_DETAILED_EMAILS || 1)),
+              baseCharPerEmail
+            ),
+            300 // Minimum size
+          );
+          
+          modelInfo = "Using standard percentage-based allocation";
+          console.log('Summarize API - Using standard calculation parameters');
+        }
+        
+        // Log the parameters we'll be using
+        console.log(`Summarize API - Processing parameters: Total emails: ${totalEmails}, Detailed: ${MAX_DETAILED_EMAILS}, Summary: ${MAX_SUMMARY_EMAILS}, Max body length: ${MAX_BODY_LENGTH}`);
+      } catch (error) {
+        // If anything fails, use safe defaults
+        console.error('Error calculating email parameters:', error);
+        MAX_DETAILED_EMAILS = Math.min(15, totalEmails);
+        MAX_SUMMARY_EMAILS = Math.min(50, totalEmails - MAX_DETAILED_EMAILS);
+        MAX_BODY_LENGTH = 600;
+        modelInfo = "Using fallback parameters due to calculation error";
+      }
       
       // Split into two tiers:
       // 1. Recent emails with truncated bodies for detailed analysis
@@ -329,9 +394,14 @@ export async function POST(request: Request) {
       const estimatedTokens = Math.ceil(prompt.length / 4);
       console.log(`Summarize API - Estimated tokens: ~${estimatedTokens}`);
       
+      // Add model info to the prompt
+      if (modelInfo) {
+        prompt += `\n\n${modelInfo}`;
+      }
+      
+      // Use the configured model from environment variables
       result = await generateObject({
-        // Use 128k context model with structured output
-        model: openai("gpt-4o-2024-08-06", { 
+        model: openai(env.OPENAI_REPORT_MODEL, { 
           structuredOutputs: true,
           maxTokens: 4000 // Limit response size
         }),

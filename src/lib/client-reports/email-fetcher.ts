@@ -1,5 +1,7 @@
 import { db } from "~/lib/db";
 import { getGraphClient } from "~/lib/auth/microsoft";
+import { findSimilarEmails } from "./email-embeddings";
+import { queueBackgroundTask } from "./background-processor";
 
 // Parameters for email fetching
 interface EmailParams {
@@ -8,6 +10,8 @@ interface EmailParams {
   clientDomains?: string[];
   clientEmails?: string[];
   maxResults?: number;
+  searchQuery?: string;  // New: Support semantic search
+  useVectorSearch?: boolean; // New: Flag to enable vector search
 }
 
 // Function to get emails from both database and Microsoft Graph API
@@ -15,11 +19,41 @@ export async function getClientEmails(params: EmailParams) {
   try {
     console.log('EmailFetcher - Fetching client emails with params:', params);
     
-    const { startDate, endDate, clientDomains = [], clientEmails = [], maxResults = 100 } = params;
+    const { 
+      startDate, 
+      endDate, 
+      clientDomains = [], 
+      clientEmails = [], 
+      maxResults = process.env.EMAIL_FETCH_LIMIT ? parseInt(process.env.EMAIL_FETCH_LIMIT) : 500,
+      searchQuery,
+      useVectorSearch = false
+    } = params;
     
-    // Get stored client emails from database
-    const dbEmails = await getClientEmailsFromDatabase(params);
-    console.log(`EmailFetcher - Found ${dbEmails.length} emails in database`);
+    let dbEmails = [];
+    
+    // If search query is provided and vector search is enabled, use semantic search
+    if (searchQuery && useVectorSearch) {
+      console.log(`EmailFetcher - Using vector search for query: "${searchQuery}"`);
+      dbEmails = await findSimilarEmails(searchQuery, {
+        limit: maxResults,
+        startDate,
+        endDate,
+        clientDomains,
+        clientEmails
+      });
+      console.log(`EmailFetcher - Found ${dbEmails.length} emails via vector search`);
+    } else {
+      // Use traditional SQL search
+      dbEmails = await getClientEmailsFromDatabase(params);
+      console.log(`EmailFetcher - Found ${dbEmails.length} emails via SQL search`);
+    }
+    
+    // Queue a background task to process any new emails
+    // Use configurable batch size from environment or a reasonable default
+    const batchSize = process.env.EMAIL_PROCESSING_BATCH_SIZE ? 
+      parseInt(process.env.EMAIL_PROCESSING_BATCH_SIZE) : 200;
+    
+    queueBackgroundTask('process_new_emails', { limit: batchSize });
     
     // Try to fetch emails from Graph API if we have access
     let graphEmails = [];
@@ -52,8 +86,10 @@ export async function getClientEmails(params: EmailParams) {
     // Convert back to array
     allEmails = Array.from(emailMap.values());
     
-    // Sort by date (newest first)
-    allEmails.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // Sort by date (newest first) - unless we're using vector search, which already orders by relevance
+    if (!useVectorSearch) {
+      allEmails.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }
     
     // Limit the number of results
     if (maxResults && allEmails.length > maxResults) {
@@ -62,7 +98,8 @@ export async function getClientEmails(params: EmailParams) {
     
     return {
       emails: allEmails,
-      fromGraphApi
+      fromGraphApi,
+      vectorSearchUsed: useVectorSearch && !!searchQuery
     };
   } catch (error) {
     console.error('EmailFetcher - Error getting comprehensive emails:', error);
@@ -70,42 +107,65 @@ export async function getClientEmails(params: EmailParams) {
   }
 }
 
-// Function to get client emails from database
+// Function to get client emails from database using SQL
 async function getClientEmailsFromDatabase(params: EmailParams) {
   try {
-    const { startDate, endDate, clientDomains = [], clientEmails = [] } = params;
+    const { startDate, endDate, clientDomains = [], clientEmails = [], maxResults = 100 } = params;
     
     console.log('EmailFetcher - Fetching from database with date range:');
     console.log(`  - Start date: ${startDate}`);
     console.log(`  - End date: ${endDate}`);
     
-    // Convert client domains and emails to SQL filter conditions
-    const domainConditions = clientDomains.map(domain => 
-      `("from" LIKE '%@${domain}' OR "to" LIKE '%@${domain}')`
-    );
+    // Using parameterized queries for better security
+    const conditions = [];
+    const queryParams = [];
     
-    const emailConditions = clientEmails.map(email => 
-      `("from" = '${email.replace(/'/g, "''")}' OR "to" = '${email.replace(/'/g, "''")}')`
-    );
+    // Add date range parameters
+    conditions.push("date >= ?");
+    queryParams.push(startDate);
     
-    // Combine conditions
-    const filterConditions = [...domainConditions, ...emailConditions];
-    const whereClause = filterConditions.length > 0 
-      ? `AND (${filterConditions.join(' OR ')})`
-      : '';
+    conditions.push("date <= ?");
+    queryParams.push(endDate);
+    
+    // Add domain and email conditions
+    const clientFilters = [];
+    
+    // Add domain conditions
+    for (const domain of clientDomains) {
+      clientFilters.push(`("from" LIKE ? OR "to" LIKE ?)`);
+      queryParams.push(`%@${domain}`);
+      queryParams.push(`%@${domain}`);
+    }
+    
+    // Add email conditions
+    for (const email of clientEmails) {
+      clientFilters.push(`("from" = ? OR "to" = ?)`);
+      queryParams.push(email);
+      queryParams.push(email);
+    }
+    
+    // Combine client filters
+    if (clientFilters.length > 0) {
+      conditions.push(`(${clientFilters.join(' OR ')})`);
+    }
+    
+    // Combine all conditions
+    const whereClause = conditions.join(' AND ');
     
     // Query the database for client emails
     const query = `
       SELECT * FROM messages 
-      WHERE date >= '${startDate}' AND date <= '${endDate}'
-      ${whereClause}
+      WHERE ${whereClause}
       ORDER BY date DESC
+      LIMIT ?
     `;
     
-    console.log('EmailFetcher - Database query:', query);
+    queryParams.push(maxResults);
+    
+    console.log('EmailFetcher - Database query params:', queryParams);
     
     const stmt = db.connection.prepare(query);
-    const emails = stmt.all();
+    const emails = stmt.all(...queryParams);
     
     return emails;
   } catch (error) {
