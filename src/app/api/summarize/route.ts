@@ -69,6 +69,23 @@ export async function POST(request: Request) {
     
     const data = summarizeRequestSchema.parse(body);
     
+    // Modify format to include search results section if search query is provided
+    let format = data.format;
+    if (data.searchQuery && !format.includes('{search_results}')) {
+      // Add search results section after the summary
+      const summaryEndIndex = format.indexOf('### Summary') + '### Summary'.length;
+      const nextSectionIndex = format.indexOf('###', summaryEndIndex);
+      
+      if (nextSectionIndex !== -1) {
+        const searchSection = `
+
+### Search Results: "${data.searchQuery}"
+{search_results}
+`;
+        format = format.slice(0, nextSectionIndex) + searchSection + format.slice(nextSectionIndex);
+      }
+    }
+    
     // Fetch client details if clientId is provided
     let clientDomains = data.domains || [];
     let clientEmails = data.emails || [];
@@ -351,7 +368,7 @@ export async function POST(request: Request) {
       
       // Build prompt with two-tier approach
       let prompt = `Generate a communication report based on these emails ${clientName ? `with ${clientName}` : ''}.
-                Use exactly this format template: "${data.format}"
+                Use exactly this format template: "${format}"
                 
                 The template may contain placeholders like {date_range}, {summary}, {action_items}, etc.
                 Replace these placeholders with appropriate content summarized from the emails.
@@ -360,9 +377,23 @@ export async function POST(request: Request) {
                 Look for patterns that show how the current approach differs from previous strategies discussed.
                 Highlight any significant pivots or changes in project focus.
                 
+                IMPORTANT: For the "highlights" field in your response, please return an empty array ([]) as this feature is no longer used.
+                
+                ${data.searchQuery && data.useVectorSearch ? 
+                  `IMPORTANT: This is an AI search for "${data.searchQuery}". This report MUST focus EXCLUSIVELY on topics related to "${data.searchQuery}". 
+                   ALL sections of this report should be focused ONLY on content related to this search query.
+                   The emails have been selected based on semantic similarity to this topic.
+                   
+                   DO NOT include a separate "Search Results" section. Instead, ensure that ALL sections (summary, key topics, etc.) 
+                   focus on "${data.searchQuery}" and related concepts.
+                   
+                   Ignore any emails or discussions not related to "${data.searchQuery}". The client is specifically looking
+                   for information about this topic only.` : ''}
+                
                 Time period: ${new Date(data.startDate).toLocaleDateString()} to ${new Date(data.endDate).toLocaleDateString()}
                 ${clientDomains.length > 0 ? `Client domains: ${clientDomains.join(', ')}` : ''}
                 ${clientEmails.length > 0 ? `Client emails: ${clientEmails.join(', ')}` : ''}
+                ${data.searchQuery ? `Search query: "${data.searchQuery}" (${data.useVectorSearch ? 'using semantic search' : 'using keyword search'})` : ''}
                 
                 Total emails in period: ${emails.length}
                 ${emailMetadata}
@@ -442,7 +473,7 @@ export async function POST(request: Request) {
         saveStmt.run(
           templateId, 
           data.saveName, 
-          data.format, 
+          format, // Use the potentially modified format 
           data.clientId, 
           data.examplePrompt || null
         );

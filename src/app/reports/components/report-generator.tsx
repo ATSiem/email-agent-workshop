@@ -29,6 +29,7 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
   const [templates, setTemplates] = useState<Template[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(initialClientId || null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   
   const [format, setFormat] = useState(`## Communication Report: {client_name} - {date_range}
 
@@ -60,7 +61,6 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
   const [endDate, setEndDate] = useState('');
   const [saveName, setSaveName] = useState('');
   const [examplePrompt, setExamplePrompt] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
   const [useVectorSearch, setUseVectorSearch] = useState(false);
   
   const [isGenerating, setIsGenerating] = useState(false);
@@ -237,7 +237,14 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
   
   async function handleGenerateReport(e: React.FormEvent) {
     e.preventDefault();
-    setError('');
+    
+    if (!selectedClientId) {
+      setError('Please select a client');
+      return;
+    }
+    
+    setIsGenerating(true);
+    setError(null);
     setGeneratedReport(null);
     setReportId('');
     setGenerationTimeMs(0);
@@ -250,55 +257,13 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
     const startTime = performance.now();
     
     try {
-      if (!selectedClientId) {
-        throw new Error('Please select a client');
-      }
-      
-      if (!startDate || !endDate) {
-        throw new Error('Please specify a date range');
-      }
-      
-      if (!format.trim()) {
-        throw new Error('Please provide a report format');
-      }
-      
-      setIsGenerating(true);
-      
-      // Get client details
-      const client = clients.find(c => c.id === selectedClientId);
-      
-      if (!client) {
-        throw new Error('Selected client not found');
-      }
-      
       // Get the authentication token
       const token = getUserAccessToken();
-      console.log('ReportGenerator - Access token available for summarize:', !!token);
       
       if (!token) {
         throw new Error('Authentication required. Please sign in again.');
       }
       
-      // Log the exact dates we're sending to the API
-      console.log('ReportGenerator - Sending request with date range:');
-      console.log('  - startDate (string):', startDate); 
-      console.log('  - endDate (string):', endDate);
-      console.log('  - startDate (ISO):', new Date(startDate).toISOString());
-      console.log('  - endDate (ISO):', new Date(endDate).toISOString());
-      
-      // Ensure we cover the full day by setting explicit time components
-      // Start of day (midnight)
-      const fullDayStart = new Date(startDate);
-      fullDayStart.setUTCHours(0, 0, 0, 0);
-      
-      // End of day (just before midnight)
-      const fullDayEnd = new Date(endDate);
-      fullDayEnd.setUTCHours(23, 59, 59, 999);
-      
-      console.log('  - fullDayStart (ISO):', fullDayStart.toISOString());
-      console.log('  - fullDayEnd (ISO):', fullDayEnd.toISOString());
-      
-      // Generate the report
       const response = await fetch('/api/summarize', {
         method: 'POST',
         headers: {
@@ -306,16 +271,15 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          // Use the explicit full day start and end to ensure we catch all emails
-          startDate: fullDayStart.toISOString(),
-          endDate: fullDayEnd.toISOString(),
-          format,
+          startDate: new Date(startDate).toISOString(),
+          endDate: new Date(endDate + 'T23:59:59').toISOString(),
+          format: format,
           clientId: selectedClientId,
           saveName: saveName || "",
           examplePrompt: examplePrompt || "",
-          searchQuery: searchQuery || undefined,
+          searchQuery: searchQuery.trim(),
           useVectorSearch: useVectorSearch,
-          reportId: newReportId, // Include the report ID for tracking
+          reportId: newReportId,
         }),
       });
       
@@ -393,17 +357,6 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
             <div className="prose dark:prose-invert max-w-none">
               <div dangerouslySetInnerHTML={{ __html: generatedReport.replace(/\n/g, '<br>') }} />
             </div>
-            
-            {reportHighlights.length > 0 && (
-              <div className="mt-6">
-                <h4 className="font-medium mb-2 dark:text-white">Key Highlights:</h4>
-                <ul className="list-disc pl-5 space-y-1">
-                  {reportHighlights.map((highlight, index) => (
-                    <li key={index} className="text-gray-700 dark:text-gray-300">{highlight}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
             
             {/* Report metadata section removed */}
           </div>
