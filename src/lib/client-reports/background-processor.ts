@@ -135,7 +135,7 @@ async function processPendingSummaries(limit = 20) {
     
     // Find emails that need summaries (where summary is empty or null)
     const stmt = db.connection.prepare(`
-      SELECT id, subject, from, to, date, body
+      SELECT id, subject, "from", "to", date, body
       FROM messages
       WHERE summary IS NULL OR summary = ''
       LIMIT ?

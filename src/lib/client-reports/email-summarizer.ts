@@ -1,5 +1,5 @@
 import { openai } from "@ai-sdk/openai";
-import { generateObject } from "ai";
+import { generateObject, generateText } from "ai";
 import { z } from "zod";
 import { env } from "~/lib/env";
 import { getCurrentModelSpec } from "~/lib/ai/model-info";
@@ -47,32 +47,65 @@ export async function generateEmailSummary(email: Email): Promise<string | null>
     // Calculate optimal token limit (usually 150 is fine for summaries)
     const maxTokens = 150;
     
-    // Call OpenAI API to generate summary
-    const result = await generateObject({
-      model: openai(env.OPENAI_SUMMARY_MODEL, { 
-        structuredOutputs: true,
-        maxTokens: maxTokens // Limit summary length
-      }),
-      schemaName: "emailSummary",
-      schemaDescription: "A concise summary of an email",
-      schema: z.object({ 
-        summary: z.string(),
-        keyPoints: z.array(z.string()).optional(),
-        topicCategory: z.string().optional(),
-      }),
-      prompt: `Summarize this email concisely:
-      
-      ${emailContent}
-      
-      Focus on the main point, any action items or requests, and key information.
-      The summary should be 1-2 sentences. Be factual and objective.`,
-    });
+    // Check if we're using a model that supports structured outputs
+    const modelName = env.OPENAI_SUMMARY_MODEL || "gpt-3.5-turbo";
+    let useStructuredOutput = modelName.includes("gpt-4");
     
-    if (!result || !result.object) {
-      throw new Error('No summary generated');
+    let summary = "";
+    
+    if (useStructuredOutput) {
+      // Use structured output for GPT-4 models
+      try {
+        const result = await generateObject({
+          model: openai(modelName, { 
+            structuredOutputs: true,
+            maxTokens: maxTokens
+          }),
+          schemaName: "emailSummary",
+          schemaDescription: "A concise summary of an email",
+          schema: z.object({ 
+            summary: z.string(),
+            keyPoints: z.array(z.string()),
+            topicCategory: z.string(),
+          }),
+          prompt: `Summarize this email concisely:
+          
+          ${emailContent}
+          
+          Focus on the main point, any action items or requests, and key information.
+          The summary should be 1-2 sentences. Be factual and objective.`,
+        });
+        
+        if (!result || !result.object) {
+          throw new Error('No summary generated');
+        }
+        
+        summary = result.object.summary;
+      } catch (error) {
+        console.error('Error using structured output:', error);
+        // Fall back to non-structured approach
+        useStructuredOutput = false;
+      }
     }
     
-    return result.object.summary;
+    if (!useStructuredOutput) {
+      // Fallback for models that don't support structured outputs (like gpt-3.5-turbo)
+      const response = await generateText({
+        model: openai(modelName),
+        prompt: `Summarize this email concisely:
+        
+        ${emailContent}
+        
+        Focus on the main point, any action items or requests, and key information.
+        The summary should be 1-2 sentences. Be factual and objective.`,
+        maxTokens: maxTokens,
+        temperature: 0.3,
+      });
+      
+      summary = response.text;
+    }
+    
+    return summary;
   } catch (error) {
     console.error('EmailSummarizer - Error summarizing email:', error);
     return null;

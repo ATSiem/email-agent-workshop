@@ -185,16 +185,16 @@ export async function findSimilarEmails(query: string, options: {
     
     // Execute vector similarity search using dot product
     // This requires embedding to be stored as properly formatted JSON arrays
-    const query = `
+    const sqlQuery = `
       SELECT id, subject, "from", "to", date, body, summary, labels, embedding
       FROM messages
       ${whereClause}
       LIMIT ?
     `;
     
-    console.log('EmailEmbeddings - Vector search query:', query);
+    console.log('EmailEmbeddings - Vector search query:', sqlQuery);
     
-    const stmt = db.connection.prepare(query);
+    const stmt = db.connection.prepare(sqlQuery);
     const results = stmt.all(limit);
     
     // Calculate similarity scores in JS (SQLite doesn't support vector operations)
