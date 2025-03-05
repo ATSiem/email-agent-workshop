@@ -380,6 +380,17 @@ export async function POST(request: Request) {
                 Do not add any headers, sections, or content that is not explicitly requested in the template.
                 The client expects the report to match their template precisely.
                 
+                CRITICAL SOURCE WEIGHTING: The 'source' field in each email MUST be used to determine how to phrase information:
+                - When 'source' is 'client': Only present statements as potential decisions if they are explicitly stated as such by the client
+                - When 'source' is 'user': Never present these as decisions. Always phrase these as suggestions, recommendations, or considerations
+                
+                Use appropriate language based on the source:
+                - For user statements: "suggested", "recommended", "proposed", "noted", "raised a concern about"
+                - For client statements: Only use "decided", "agreed to", "determined" when explicitly confirmed
+                
+                Only use words indicating decision or agreement when the CLIENT explicitly confirms something. 
+                User statements should always be phrased as suggestions or considerations regardless of their tone or wording.
+                
                 Pay special attention to identifying strategy changes and shifts in direction in these communications. 
                 Look for patterns that show how the current approach differs from previous strategies discussed.
                 Highlight any significant pivots or changes in project focus.
