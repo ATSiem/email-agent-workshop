@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { XMarkIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
+import { getUserAccessToken } from '~/lib/auth/microsoft';
 
 interface ReportFeedbackProps {
   reportId: string;        // Unique ID for the generated report
@@ -29,6 +30,7 @@ export function ReportFeedback({
   const [actionsTaken, setActionsTaken] = useState<string[]>([]);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [shouldAnimate, setShouldAnimate] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   
   // Animation timer
   // Initially start expanded
@@ -66,10 +68,21 @@ export function ReportFeedback({
     setLoading(true);
     
     try {
+      // Get the authentication token
+      const token = getUserAccessToken();
+      
+      if (!token) {
+        console.error('Authentication required. Please sign in again.');
+        setError('Authentication required. Please sign in again.');
+        setLoading(false);
+        return;
+      }
+      
       const response = await fetch('/api/feedback', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           reportId,
@@ -126,11 +139,21 @@ export function ReportFeedback({
 
   // Skip feedback
   const handleSkip = () => {
+    // Get the authentication token
+    const token = getUserAccessToken();
+    
+    if (!token) {
+      console.error('Authentication required. Please sign in again.');
+      setError('Authentication required. Please sign in again.');
+      return;
+    }
+    
     // Still log that feedback was skipped
     fetch('/api/feedback/skip', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
       },
       body: JSON.stringify({
         reportId,
@@ -185,6 +208,13 @@ export function ReportFeedback({
           </div>
         ) : (
           <>
+            {error && (
+              <div className="mb-4 p-2 bg-red-100 border border-red-400 text-red-700 rounded">
+                <p className="text-sm">{error}</p>
+                <p className="text-xs mt-1">Please try refreshing the page and signing in again.</p>
+              </div>
+            )}
+            
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 How helpful was this report?
