@@ -34,6 +34,17 @@ jest.mock('../src/lib/auth/microsoft', () => ({
   getUserAccessToken: jest.fn()
 }));
 
+// Define a test domain for the mock environment
+const TEST_ALLOWED_DOMAIN = 'example.com';
+
+// Mock the env module
+jest.mock('../src/lib/env', () => ({
+  env: {
+    ALLOWED_EMAIL_DOMAIN: TEST_ALLOWED_DOMAIN
+  },
+  isProduction: false
+}));
+
 // Mock the middleware module
 jest.mock('../src/middleware', () => {
   // Import the protected paths from the actual middleware
@@ -50,6 +61,7 @@ jest.mock('../src/middleware', () => {
   const middleware = (request) => {
     const path = request.nextUrl.pathname;
     const { NextResponse } = require('next/server');
+    const { env } = require('../src/lib/env');
     
     // Only check authentication for API routes that need protection
     if (PROTECTED_API_PATHS.some(prefix => path.startsWith(prefix))) {
@@ -73,6 +85,24 @@ jest.mock('../src/middleware', () => {
           { status: 401 }
         );
       }
+      
+      // Get user email from the request headers (set by auth-provider)
+      const userEmail = request.headers.get('X-User-Email');
+      
+      // Check if the user's email domain is allowed
+      if (userEmail && env.ALLOWED_EMAIL_DOMAIN) {
+        const emailDomain = userEmail.split('@')[1]?.toLowerCase();
+        
+        if (emailDomain !== env.ALLOWED_EMAIL_DOMAIN) {
+          return NextResponse.json(
+            {
+              error: "Access denied",
+              message: `This application is restricted to users with ${env.ALLOWED_EMAIL_DOMAIN} email addresses`
+            },
+            { status: 403 }
+          );
+        }
+      }
     }
     
     // Allow the request to continue
@@ -84,6 +114,7 @@ jest.mock('../src/middleware', () => {
 
 const { middleware } = require('../src/middleware');
 const { getUserAccessToken } = require('../src/lib/auth/microsoft');
+const { env } = require('../src/lib/env');
 
 describe('Authentication Middleware', () => {
   beforeEach(() => {
@@ -147,5 +178,61 @@ describe('Authentication Middleware', () => {
     
     // Expect the middleware to call next()
     expect(NextResponse.next).toHaveBeenCalled();
+  });
+  
+  // Domain validation tests
+  test('should allow access to protected routes with valid token and allowed domain', () => {
+    // Create a mock request for a protected route with an Authorization header and valid email domain
+    const request = new MockNextRequest('/api/clients', {
+      'Authorization': 'Bearer valid-token',
+      'X-User-Email': `user@${env.ALLOWED_EMAIL_DOMAIN}`
+    });
+    
+    // Call the middleware
+    const response = middleware(request);
+    
+    // Expect the middleware to call next()
+    expect(NextResponse.next).toHaveBeenCalled();
+  });
+  
+  test('should block access to protected routes with valid token but disallowed domain', () => {
+    // Create a mock request for a protected route with an Authorization header but invalid email domain
+    const request = new MockNextRequest('/api/clients', {
+      'Authorization': 'Bearer valid-token',
+      'X-User-Email': 'user@otherdomain.com'
+    });
+    
+    // Call the middleware
+    const response = middleware(request);
+    
+    // Expect the middleware to return a 403 response
+    expect(NextResponse.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: "Access denied",
+        message: expect.stringContaining(env.ALLOWED_EMAIL_DOMAIN)
+      }),
+      { status: 403 }
+    );
+  });
+  
+  test('should allow access when no domain restriction is configured', () => {
+    // Temporarily modify the env mock to simulate no domain restriction
+    const originalDomain = env.ALLOWED_EMAIL_DOMAIN;
+    env.ALLOWED_EMAIL_DOMAIN = '';
+    
+    // Create a mock request for a protected route with an Authorization header and any email domain
+    const request = new MockNextRequest('/api/clients', {
+      'Authorization': 'Bearer valid-token',
+      'X-User-Email': 'user@anydomain.com'
+    });
+    
+    // Call the middleware
+    const response = middleware(request);
+    
+    // Expect the middleware to call next()
+    expect(NextResponse.next).toHaveBeenCalled();
+    
+    // Restore the original domain setting
+    env.ALLOWED_EMAIL_DOMAIN = originalDomain;
   });
 }); 

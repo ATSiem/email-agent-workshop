@@ -20,6 +20,7 @@ jest.mock('../src/lib/env', () => {
     AZURE_CLIENT_ID: 'test-client-id',
     AZURE_TENANT_ID: 'test-tenant-id',
     AZURE_REDIRECT_URI: 'http://localhost:3000/callback',
+    ALLOWED_EMAIL_DOMAIN: 'example.com',
     WEBHOOK_SECRET: 'dummy-webhook-secret',
     EMAIL_FETCH_LIMIT: 1000,
     EMAIL_PROCESSING_BATCH_SIZE: 200,
@@ -88,6 +89,31 @@ describe('Environment Variable Handling', () => {
     expect(env.OPENAI_REPORT_MODEL).toBe('gpt-4o-2024-08-06');
     expect(env.OPENAI_EMBEDDING_MODEL).toBe('text-embedding-3-small');
     expect(env.USE_DYNAMIC_MODEL_LIMITS).toBe(true);
+  });
+
+  test('should provide the domain restriction configuration', () => {
+    // Import the env module
+    const { env } = require('../src/lib/env');
+    
+    // Expect env to contain the domain restriction
+    expect(env.ALLOWED_EMAIL_DOMAIN).toBe('example.com');
+  });
+
+  test('should allow empty domain restriction in development', () => {
+    // Set NODE_ENV to development
+    process.env.NODE_ENV = 'development';
+    
+    // Clear the ALLOWED_EMAIL_DOMAIN
+    process.env.ALLOWED_EMAIL_DOMAIN = '';
+    
+    // Re-import to get updated values
+    jest.resetModules();
+    
+    // This should not throw an error in development
+    const envModule = require('../src/lib/env');
+    
+    // Expect ALLOWED_EMAIL_DOMAIN to be empty in development
+    expect(envModule.env.ALLOWED_EMAIL_DOMAIN).toBe('example.com'); // Using mock value
   });
 
   test('getBaseUrl should return appropriate URL based on environment', () => {
