@@ -373,6 +373,13 @@ export async function POST(request: Request) {
                 The template may contain placeholders like {date_range}, {summary}, {action_items}, etc.
                 Replace these placeholders with appropriate content summarized from the emails.
                 
+                IMPORTANT: Follow ONLY the format provided in the template. Do not add any sections that are not explicitly included in the template.
+                If a section is not in the template, do not include it in your response.
+                
+                CRITICAL INSTRUCTION: Your output must EXACTLY match the structure of the provided template. 
+                Do not add any headers, sections, or content that is not explicitly requested in the template.
+                The client expects the report to match their template precisely.
+                
                 Pay special attention to identifying strategy changes and shifts in direction in these communications. 
                 Look for patterns that show how the current approach differs from previous strategies discussed.
                 Highlight any significant pivots or changes in project focus.
