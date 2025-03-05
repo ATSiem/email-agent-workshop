@@ -182,7 +182,7 @@ export default function FeedbackAnalyticsPage() {
                 {feedback.map((item) => (
                   <tr key={item.id}>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(item.createdAt).toLocaleDateString()}
+                      {new Date(Number(item.createdAt) * 1000).toLocaleDateString()}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
                       {item.clientName || 'Unknown'}
