@@ -35,8 +35,8 @@ export async function POST(request: NextRequest) {
       INSERT INTO report_feedback (
         id, report_id, client_id, rating, feedback_text, actions_taken,
         start_date, end_date, vector_search_used, search_query, email_count,
-        user_agent, ip_address
-      ) VALUES (?, ?, ?, NULL, 'skipped', '[]', ?, ?, ?, ?, ?, ?, ?)
+        user_agent, ip_address, copied_to_clipboard
+      ) VALUES (?, ?, ?, NULL, 'skipped', '[]', ?, ?, ?, ?, ?, ?, ?, 0)
     `);
     
     const feedbackId = crypto.randomUUID();

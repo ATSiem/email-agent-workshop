@@ -45,7 +45,7 @@ export async function GET() {
         AVG(CASE WHEN rating IS NOT NULL THEN rating ELSE NULL END) as averageRating,
         AVG(vector_search_used) as vectorSearchPercentage,
         AVG(generation_time_ms) as averageGenerationTime,
-        AVG(copied_to_clipboard) as clipboardCopyRate,
+        SUM(CASE WHEN copied_to_clipboard = 1 THEN 1 ELSE 0 END) / CAST(COUNT(*) AS REAL) as clipboardCopyRate,
         SUM(CASE WHEN rating IS NOT NULL THEN 1 ELSE 0 END) / COUNT(*) as feedbackSubmissionRate
       FROM report_feedback
     `);
