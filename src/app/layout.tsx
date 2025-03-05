@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "../styles/global.css";
 import { AuthProvider } from "~/components/auth-provider";
 import { BackgroundProcessorInit } from "~/components/background-processor-init";
+import { ThemeProvider } from "~/components/theme-provider";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 
@@ -25,6 +26,13 @@ export const metadata: Metadata = {
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  // Run database migrations on server only
+  if (typeof window === 'undefined') {
+    import('~/lib/db/migration-manager').then(({ runMigrations }) => {
+      runMigrations();
+    });
+  }
+  
   return (
     <html lang="en" suppressHydrationWarning>
       <body
@@ -32,8 +40,10 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <AuthProvider>
-          <BackgroundProcessorInit />
-          {children}
+          <ThemeProvider>
+            <BackgroundProcessorInit />
+            {children}
+          </ThemeProvider>
         </AuthProvider>
       </body>
     </html>

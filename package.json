@@ -6,8 +6,11 @@
     "node": ">=20.0.0"
   },
   "scripts": {
+    "predev": "./ensure-node-version.sh",
     "dev": "next dev --turbopack",
+    "prebuild": "./ensure-node-version.sh",
     "build": "next build",
+    "prestart": "./ensure-node-version.sh",
     "start": "next start",
     "lint": "next lint",
     "db:generate": "drizzle-kit generate --config=src/lib/db/config.ts",
@@ -23,11 +26,16 @@
     "@azure/identity": "^4.0.0",
     "@azure/msal-browser": "^3.10.0",
     "@azure/msal-node": "^2.7.0",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
     "@heroicons/react": "^2.2.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",
+    "@mui/material": "^6.4.6",
     "@radix-ui/react-accordion": "^1.2.3",
+    "@radix-ui/react-slot": "^1.1.2",
     "ai": "^4.1.41",
     "better-sqlite3": "^11.8.1",
+    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.39.3",
     "eslint-config-next": "^15.1.7",
@@ -58,6 +66,7 @@
     "tailwindcss": "^4.0.0",
     "tailwindcss-animate": "^1.0.7",
     "ts-jest": "^29.2.6",
+    "tsx": "^4.19.3",
     "typescript": "^5"
   }
 }

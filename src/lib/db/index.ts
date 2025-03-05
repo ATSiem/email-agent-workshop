@@ -34,7 +34,9 @@ if (typeof window === 'undefined') {
         created_at INTEGER NOT NULL DEFAULT (unixepoch()),
         updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
         summary TEXT NOT NULL,
-        labels TEXT NOT NULL
+        labels TEXT NOT NULL,
+        cc TEXT DEFAULT '',
+        bcc TEXT DEFAULT ''
       );
       
       CREATE TABLE IF NOT EXISTS clients (
@@ -77,9 +79,66 @@ if (typeof window === 'undefined') {
       );
     `);
     
+    // Add SQLite functions for vector operations
+    if (typeof sqlite.create_function === 'function') {
+      sqlite.create_function("cosine_similarity", (vec1Str, vec2Str) => {
+        try {
+          // Parse the JSON strings to arrays
+          const vec1 = JSON.parse(vec1Str);
+          const vec2 = JSON.parse(vec2Str);
+          
+          if (!Array.isArray(vec1) || !Array.isArray(vec2) || vec1.length !== vec2.length) {
+            console.error('Invalid vectors for cosine similarity', { 
+              vec1Length: Array.isArray(vec1) ? vec1.length : 'not array', 
+              vec2Length: Array.isArray(vec2) ? vec2.length : 'not array' 
+            });
+            return 0;
+          }
+          
+          // Calculate dot product
+          let dotProduct = 0;
+          let mag1 = 0;
+          let mag2 = 0;
+          
+          for (let i = 0; i < vec1.length; i++) {
+            dotProduct += vec1[i] * vec2[i];
+            mag1 += vec1[i] * vec1[i];
+            mag2 += vec2[i] * vec2[i];
+          }
+          
+          mag1 = Math.sqrt(mag1);
+          mag2 = Math.sqrt(mag2);
+          
+          if (mag1 === 0 || mag2 === 0) return 0;
+          
+          return dotProduct / (mag1 * mag2);
+        } catch (error) {
+          console.error('Error calculating cosine similarity:', error);
+          return 0;
+        }
+      });
+    } else {
+      console.warn('SQLite create_function method not available - vector search functionality will be limited');
+    }
+    
     db = drizzle(sqlite, { schema });
     // @ts-ignore - adding the connection property for raw SQL access
     db.connection = sqlite;
+    
+    // Run migrations synchronously during initialization
+    try {
+      // Export the db object first before importing migration-manager
+      // This ensures db is fully initialized before migrations try to use it
+      module.exports = { db };
+      
+      // Now import and run migrations
+      const { runMigrations } = require('./migration-manager');
+      runMigrations().catch(err => {
+        console.error('Failed to run database migrations:', err);
+      });
+    } catch (error) {
+      console.error('Error importing migration manager:', error);
+    }
   } catch (error) {
     console.error("Database initialization error:", error);
     // Provide a fallback db object

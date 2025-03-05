@@ -103,6 +103,71 @@ export function getGraphClient() {
     authProvider: (done) => {
       done(null, userAccessToken);
     },
-    debugLogging: true
+    debugLogging: true,
+    // Enhanced middleware to log all requests and responses
+    middlewares: [
+      {
+        // Log all requests
+        execute: async (context, next) => {
+          const { options } = context;
+          
+          console.log(`Graph API Request - ${new Date().toISOString()}`);
+          console.log(`  URL: ${options.method} ${options.url}`);
+          
+          if (options.headers) {
+            // Log headers except Authorization which contains the token
+            const filteredHeaders = { ...options.headers };
+            if (filteredHeaders.Authorization) {
+              filteredHeaders.Authorization = filteredHeaders.Authorization.substring(0, 15) + '...';
+            }
+            console.log(`  Headers: ${JSON.stringify(filteredHeaders)}`);
+          }
+          
+          if (options.body) {
+            console.log(`  Request Body: ${JSON.stringify(options.body)}`);
+          }
+          
+          try {
+            // Execute the request
+            await next();
+            
+            // Log the response
+            console.log(`Graph API Response - ${new Date().toISOString()}`);
+            console.log(`  Status: ${context.response.status}`);
+            
+            // For debugging, log a sample of the response data
+            if (context.response.ok) {
+              try {
+                const responseClone = context.response.clone();
+                const responseBody = await responseClone.json();
+                
+                // Don't log the entire response for large datasets
+                if (responseBody && responseBody.value && Array.isArray(responseBody.value)) {
+                  console.log(`  Response: Array with ${responseBody.value.length} items`);
+                  
+                  // Log a preview of the first few items
+                  if (responseBody.value.length > 0) {
+                    const sampleSize = Math.min(2, responseBody.value.length);
+                    const sample = responseBody.value.slice(0, sampleSize);
+                    console.log(`  Sample items: ${JSON.stringify(sample)}`);
+                  }
+                } else {
+                  // For smaller responses, log more details
+                  const responsePreview = JSON.stringify(responseBody).substring(0, 500);
+                  console.log(`  Response preview: ${responsePreview}${responsePreview.length >= 500 ? '...' : ''}`);
+                }
+              } catch (e) {
+                console.log(`  Error parsing response for logging: ${e.message || e}`);
+              }
+            }
+          } catch (error) {
+            console.log(`Graph API Error - ${new Date().toISOString()}`);
+            console.log(`  Status: ${error.statusCode}`);
+            console.log(`  Message: ${error.message}`);
+            throw error;
+          }
+        }
+      }
+    ]
   });
 }

@@ -139,91 +139,118 @@ export async function findSimilarEmails(query: string, options: {
   clientEmails?: string[];
 }) {
   try {
-    const { limit = 20, startDate, endDate, clientDomains = [], clientEmails = [] } = options;
+    const {
+      limit = 10,
+      startDate,
+      endDate,
+      clientDomains = [],
+      clientEmails = []
+    } = options;
+
+    // Check if cc and bcc columns exist in the database
+    const columnInfo = await db.connection.get('PRAGMA table_info(messages)');
+    const hasCcBccColumns = columnInfo.some((column: any) => column.name === 'cc') && 
+                           columnInfo.some((column: any) => column.name === 'bcc');
     
-    // Generate embedding for the query
-    const embedding = await generateEmbeddingForQuery(query);
-    if (!embedding) {
-      throw new Error('Failed to generate embedding for query');
+    console.log(`EmailEmbeddings - Vector search has cc/bcc columns: ${hasCcBccColumns}`);
+    
+    // If columns don't exist, log a warning but continue
+    if (!hasCcBccColumns) {
+      console.warn('EmailEmbeddings - CC and BCC columns not found in messages table. Some email filtering may be limited.');
     }
     
-    // Build SQL conditions for client domains and emails
-    const conditions = [];
+    // Get user email for filtering
+    const userEmail = await getUserEmail();
+    console.log(`EmailEmbeddings - User email for vector search: ${userEmail}`);
     
-    if (startDate) {
-      // ISO date string comparison for SQLite - ignore time part for now
-      const dateStr = startDate.split('T')[0];
-      conditions.push(`date >= '${dateStr}'`);
-    }
-    
-    if (endDate) {
-      // ISO date string comparison for SQLite - ignore time part for now
-      const dateStr = endDate.split('T')[0];
-      conditions.push(`date <= '${dateStr}'`);
-    }
-    
-    // Build domain and email conditions
-    const domainConditions = clientDomains.map(domain => 
-      `("from" LIKE '%@${domain.replace(/'/g, "''")}' OR "to" LIKE '%@${domain.replace(/'/g, "''")}')`
-    );
-    
-    const emailConditions = clientEmails.map(email => 
-      `("from" = '${email.replace(/'/g, "''")}' OR "to" = '${email.replace(/'/g, "''")}')`
-    );
-    
-    if (domainConditions.length > 0 || emailConditions.length > 0) {
-      conditions.push(`(${[...domainConditions, ...emailConditions].join(' OR ')})`);
-    }
-    
-    // Ensure we only search emails with embeddings
-    conditions.push(`embedding IS NOT NULL`);
-    
-    // Build the WHERE clause
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    
-    console.log("EmailEmbeddings - Vector search conditions:", whereClause);
-    
-    // Execute vector similarity search using dot product
-    // This requires embedding to be stored as properly formatted JSON arrays
-    const sqlQuery = `
-      SELECT id, subject, "from", "to", date, body, summary, labels, embedding
-      FROM messages
-      ${whereClause}
-      LIMIT ?
-    `;
-    
-    console.log('EmailEmbeddings - Vector search query:', sqlQuery);
-    
-    const stmt = db.connection.prepare(sqlQuery);
-    const results = stmt.all(limit);
-    
-    // Calculate similarity scores in JS (SQLite doesn't support vector operations)
-    const scoredResults = results.map(email => {
-      const emailEmbedding = JSON.parse(email.embedding || '[]');
-      const similarityScore = calculateCosineSimilarity(embedding, emailEmbedding);
+    // Build domain-based conditions
+    let domainConditions = '';
+    if (clientDomains.length > 0) {
+      const domainFilters = clientDomains.map((domain) => {
+        const sanitizedDomain = domain.replace(/'/g, "''");  // SQL escape single quotes
+        return `("from" LIKE '%@${sanitizedDomain}%' OR "from" LIKE '%@%.${sanitizedDomain}%' OR "to" LIKE '%@${sanitizedDomain}%' OR "to" LIKE '%@%.${sanitizedDomain}%'${hasCcBccColumns ? ` OR "cc" LIKE '%@${sanitizedDomain}%' OR "cc" LIKE '%@%.${sanitizedDomain}%' OR "bcc" LIKE '%@${sanitizedDomain}%' OR "bcc" LIKE '%@%.${sanitizedDomain}%'` : ''})`;
+      }).join(' OR ');
       
-      return {
-        ...email,
-        similarity_score: similarityScore
-      };
-    });
+      if (domainFilters) {
+        domainConditions = ` OR (${domainFilters})`;
+      }
+    }
     
-    // Sort by similarity score
-    scoredResults.sort((a, b) => b.similarity_score - a.similarity_score);
+    // Build client email conditions with checks against both FROM and TO fields
+    const emailConditions = [];
     
-    // Log the search results for debugging
-    console.log(`EmailEmbeddings - Found ${scoredResults.length} semantic matches for query "${query}"`);
-    if (scoredResults.length > 0) {
-      console.log("EmailEmbeddings - Top 3 matches:");
-      scoredResults.slice(0, 3).forEach((email, idx) => {
-        console.log(`  ${idx+1}. Subject: "${email.subject}" (score: ${email.similarity_score.toFixed(4)})`);
+    if (userEmail) {
+      const sanitizedUserEmail = userEmail.replace(/'/g, "''");  // SQL escape single quotes
+      
+      // Add conditions for each client email
+      clientEmails.forEach(clientEmail => {
+        const sanitizedClientEmail = clientEmail.replace(/'/g, "''");  // SQL escape single quotes
+        if (hasCcBccColumns) {
+          // User to client
+          emailConditions.push(`("from" = '${sanitizedUserEmail}' AND ("to" = '${sanitizedClientEmail}' OR "cc" LIKE '%${sanitizedClientEmail}%' OR "bcc" LIKE '%${sanitizedClientEmail}%'))`);
+          // Client to user
+          emailConditions.push(`("from" = '${sanitizedClientEmail}' AND ("to" = '${sanitizedUserEmail}' OR "cc" LIKE '%${sanitizedUserEmail}%' OR "bcc" LIKE '%${sanitizedUserEmail}%'))`);
+        } else {
+          // User to client
+          emailConditions.push(`("from" = '${sanitizedUserEmail}' AND "to" = '${sanitizedClientEmail}')`);
+          // Client to user
+          emailConditions.push(`("from" = '${sanitizedClientEmail}' AND "to" = '${sanitizedUserEmail}')`);
+        }
       });
     }
     
-    // Return top results
-    return scoredResults.slice(0, limit);
+    // Combine all email conditions
+    const emailFilter = emailConditions.length > 0 ? `(${emailConditions.join(' OR ')})` : '1=1'; // Default condition that's always true
+    
+    // Generate embedding for the query
+    const queryEmbedding = await generateEmbeddingForQuery(query);
+    if (!queryEmbedding) {
+      console.error('EmailEmbeddings - Failed to generate embedding for query');
+      return [];
+    }
+    
+    // Convert embedding to string for SQL
+    const queryEmbeddingStr = JSON.stringify(queryEmbedding);
+    
+    // Build date conditions
+    const dateConditions = [];
+    if (startDate) {
+      const startDateStr = new Date(startDate).toISOString().split('T')[0];
+      dateConditions.push(`date >= '${startDateStr}'`);
+    }
+    if (endDate) {
+      const endDateStr = new Date(endDate).toISOString().split('T')[0];
+      dateConditions.push(`date <= '${endDateStr}'`);
+    }
+    
+    // Combine date conditions
+    const dateFilter = dateConditions.length > 0 ? `AND ${dateConditions.join(' AND ')}` : '';
+    
+    // Build the SQL query for vector search
+    const vectorSearchQuery = `
+      SELECT id, subject, from, to, date, body, summary, 
+        json_extract(embedding, '$') as embedding_json,
+        (SELECT cosine_similarity(json_extract(embedding, '$'), json('${queryEmbeddingStr}'))) as similarity
+      FROM messages
+      WHERE embedding IS NOT NULL ${dateFilter}
+        AND (${emailFilter}${domainConditions})
+      ORDER BY similarity DESC
+      LIMIT ${limit}
+    `;
+    
+    console.log('EmailEmbeddings - Vector search query:', vectorSearchQuery);
+    
+    // Execute the query
+    const results = await db.connection.all(vectorSearchQuery);
+    
+    // Process results
+    return results.map((result: any) => ({
+      ...result,
+      embedding: JSON.parse(result.embedding_json || '[]'),
+      source: 'vector_search'
+    }));
   } catch (error) {
-    console.error('EmailEmbeddings - Error in vector search:', error);
+    console.error('EmailEmbeddings - Error finding similar emails:', error);
     return [];
   }
 }

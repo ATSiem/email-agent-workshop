@@ -297,7 +297,20 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Client not found" }, { status: 404 });
     }
     
-    // First, delete any associated report templates
+    // First, delete any associated report feedback
+    try {
+      const deleteFeedbackStmt = db.connection.prepare(`
+        DELETE FROM report_feedback WHERE client_id = ?
+      `);
+      
+      deleteFeedbackStmt.run(clientId);
+      console.log(`Deleted report feedback for client ${clientId}`);
+    } catch (feedbackError) {
+      console.error("Error deleting client feedback:", feedbackError);
+      // Continue with deletion even if feedback deletion fails
+    }
+    
+    // Next, delete any associated report templates
     const deleteTemplatesStmt = db.connection.prepare(`
       DELETE FROM report_templates WHERE client_id = ?
     `);

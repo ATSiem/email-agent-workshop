@@ -31,7 +31,8 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   
-  const [format, setFormat] = useState(`## Communication Report: {client_name} - {date_range}
+  // Default report format
+  const defaultFormat = `## Communication Report: {client_name} - {date_range}
 
 ### Summary
 {summary}
@@ -55,7 +56,9 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
 {next_steps}
 
 ### Open Questions
-{open_questions}`);
+{open_questions}`;
+  
+  const [format, setFormat] = useState(defaultFormat);
   
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -189,7 +192,12 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
   
   // Load template when selected
   useEffect(() => {
-    if (!selectedTemplateId) return;
+    if (!selectedTemplateId) {
+      // Reset to default format when no template is selected
+      setFormat(defaultFormat);
+      setExamplePrompt("");
+      return;
+    }
     
     async function fetchTemplate() {
       try {
@@ -429,16 +437,16 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
             
             <div>
               <label htmlFor="templateId" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Template (Optional)
+                Template
               </label>
               <select
                 id="templateId"
                 value={selectedTemplateId || ''}
                 onChange={(e) => setSelectedTemplateId(e.target.value || null)}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                disabled={!selectedClientId || templates.length === 0}
+                disabled={!selectedClientId}
               >
-                <option value="">Select a template</option>
+                <option value="">Default</option>
                 {templates.map((template) => (
                   <option key={template.id} value={template.id}>
                     {template.name}

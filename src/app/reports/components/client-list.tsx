@@ -40,10 +40,10 @@ export function ClientList({ onSelectClient, id }: ClientListProps) {
       console.log('ClientList - Fetching clients');
       const response = await fetch('/api/clients', {
         headers: {
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          'Cache-Control': 'no-cache'
         },
-        // Prevent caching issues
-        cache: 'no-store'
+        cache: 'no-cache'
       });
       console.log('ClientList - Response status:', response.status);
       
@@ -93,10 +93,10 @@ export function ClientList({ onSelectClient, id }: ClientListProps) {
       const response = await fetch(`/api/clients?id=${clientId}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          'Cache-Control': 'no-cache'
         },
-        // Prevent caching issues
-        cache: 'no-store'
+        cache: 'no-cache'
       });
       
       if (!response.ok) {

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '~/components/auth-provider';
 import { LoginButton } from '~/components/login-button';
 import { ClientForm } from './components/client-form';
@@ -8,41 +8,13 @@ import { ReportGenerator } from './components/report-generator';
 import { ClientList } from './components/client-list';
 import { TemplateList } from './components/template-list';
 import Link from 'next/link';
-import { Moon, Sun } from 'lucide-react';
+import { ThemeToggle } from '~/components/theme-provider';
 
 export function ClientPage() {
   const [activeView, setActiveView] = useState('clients'); // 'clients', 'templates', 'generate'
   const [selectedClientId, setSelectedClientId] = useState(null);
-  const [darkMode, setDarkMode] = useState(false);
   
   const { isAuthenticated, isLoading: authLoading, user, logout } = useAuth();
-  
-  // Set up dark mode with system preference as default
-  useEffect(() => {
-    // Check if user preference is stored
-    const savedMode = localStorage.getItem('darkMode');
-    
-    if (savedMode !== null) {
-      // Use saved preference if available
-      setDarkMode(savedMode === 'true');
-    } else {
-      // Otherwise check system preference
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      setDarkMode(prefersDark);
-    }
-  }, []);
-  
-  // Apply dark mode class to html element
-  useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-    
-    // Save preference to localStorage
-    localStorage.setItem('darkMode', darkMode.toString());
-  }, [darkMode]);
 
   return (
     <div className="mx-auto mt-10 max-w-screen-lg">
@@ -52,16 +24,16 @@ export function ClientPage() {
         </div>
         <div className="flex items-center gap-4">
           {/* Dark mode toggle */}
-          <button 
-            onClick={() => setDarkMode(!darkMode)}
-            className="p-2 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200"
-            aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
-          >
-            {darkMode ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
+          <ThemeToggle />
           
           {isAuthenticated && (
             <div className="flex items-center gap-2">
+              <Link
+                href="/settings"
+                className="px-3 py-1 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-md text-sm text-gray-700 dark:text-gray-200 transition-colors"
+              >
+                Settings
+              </Link>
               <span className="text-sm text-gray-600 dark:text-gray-300">
                 {user?.name || user?.username || 'Signed in'}
               </span>

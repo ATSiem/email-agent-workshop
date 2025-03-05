@@ -29,6 +29,41 @@ export async function getClientEmails(params: EmailParams) {
       useVectorSearch = false
     } = params;
     
+    console.log('EmailFetcher - Original client domains:', clientDomains);
+    console.log('EmailFetcher - Original client emails:', clientEmails);
+    
+    // Expand client domains to include common variations
+    const expandedDomains = [...clientDomains];
+    
+    // If any email from albany.edu is included, add the domain
+    if (clientEmails.some(email => email.endsWith('@albany.edu')) && !clientDomains.includes('albany.edu')) {
+      console.log('EmailFetcher - Adding albany.edu domain based on email addresses');
+      expandedDomains.push('albany.edu');
+    }
+    
+    // Extract domains from emails and add them if not already included
+    const emailDomains = clientEmails
+      .map(email => {
+        const parts = email.split('@');
+        return parts.length > 1 ? parts[1] : null;
+      })
+      .filter(domain => domain && !expandedDomains.includes(domain));
+    
+    emailDomains.forEach(domain => {
+      if (domain && !expandedDomains.includes(domain)) {
+        console.log(`EmailFetcher - Adding domain ${domain} extracted from client emails`);
+        expandedDomains.push(domain);
+      }
+    });
+    
+    // Use expanded domains for queries
+    const enhancedParams = {
+      ...params,
+      clientDomains: expandedDomains
+    };
+    
+    console.log('EmailFetcher - Enhanced client domains:', expandedDomains);
+    
     let dbEmails = [];
     
     // Try both vector and SQL search when appropriate
@@ -53,7 +88,7 @@ export async function getClientEmails(params: EmailParams) {
     }
     
     // Always perform traditional SQL search
-    const sqlEmails = await getClientEmailsFromDatabase(params);
+    const sqlEmails = await getClientEmailsFromDatabase(enhancedParams);
     console.log(`EmailFetcher - Found ${sqlEmails.length} emails via SQL search`);
     
     // Use vector search results if available and not empty, otherwise fall back to SQL results
@@ -80,7 +115,7 @@ export async function getClientEmails(params: EmailParams) {
       
       if (client) {
         // Get emails from Graph API filtered by client domains/emails
-        graphEmails = await getClientEmailsFromGraph(params);
+        graphEmails = await getClientEmailsFromGraph(enhancedParams);
         console.log(`EmailFetcher - Found ${graphEmails.length} emails from Graph API`);
         fromGraphApi = graphEmails.length > 0;
       }
@@ -130,7 +165,7 @@ async function getClientEmailsFromDatabase(params: EmailParams) {
       endDate, 
       clientDomains = [], 
       clientEmails = [], 
-      maxResults = 100,
+      maxResults = 1000,
       searchQuery = ""  // Add support for standard keyword search
     } = params;
     
@@ -156,98 +191,67 @@ async function getClientEmailsFromDatabase(params: EmailParams) {
       // Continue with empty userEmail - will fall back to old behavior
     }
     
-    // Using parameterized queries for better security
-    const conditions = [];
-    const queryParams = [];
+    // Check if cc and bcc columns exist in the database
+    const columnInfo = await db.connection.get('PRAGMA table_info(messages)');
+    const hasCcBccColumns = columnInfo.some((column: any) => column.name === 'cc') && 
+                           columnInfo.some((column: any) => column.name === 'bcc');
     
-    // Add date range parameters - convert ISO strings to just the date part
-    if (startDate) {
-      const dateStr = new Date(startDate).toISOString().split('T')[0];
-      conditions.push("date >= ?");
-      queryParams.push(dateStr);
+    console.log(`EmailFetcher - Database has cc/bcc columns: ${hasCcBccColumns}`);
+    
+    // If columns don't exist, log a warning but continue
+    if (!hasCcBccColumns) {
+      console.warn('EmailFetcher - CC and BCC columns not found in messages table. Some email filtering may be limited.');
     }
     
-    if (endDate) {
-      const dateStr = new Date(endDate).toISOString().split('T')[0];
-      conditions.push("date <= ?");
-      queryParams.push(dateStr);
-    }
+    // Get formatted date strings for query params
+    const startDateStr = new Date(startDate).toISOString().split('T')[0];
+    const endDateStr = new Date(endDate).toISOString().split('T')[0];
+    const queryParams = [startDateStr, endDateStr];
     
-    // Add search term if provided (for standard non-vector search)
-    if (searchQuery && searchQuery.trim()) {
-      // Search in subject and body
-      conditions.push("(subject LIKE ? OR body LIKE ?)");
-      const searchTerm = `%${searchQuery}%`;
-      queryParams.push(searchTerm);
-      queryParams.push(searchTerm);
-    }
-    
-    // Improved filtering logic when we have the user's email
-    if (userEmail && (clientDomains.length > 0 || clientEmails.length > 0)) {
-      const clientFilters = [];
+    // Build domain-based conditions
+    let domainConditions = '';
+    if (clientDomains.length > 0) {
+      const domainFilters = clientDomains.map((domain, i) => {
+        const sanitizedDomain = domain.replace(/'/g, "''");  // SQL escape single quotes
+        return `("from" LIKE '%@${sanitizedDomain}%' OR "from" LIKE '%@%.${sanitizedDomain}%' OR "to" LIKE '%@${sanitizedDomain}%' OR "to" LIKE '%@%.${sanitizedDomain}%'${hasCcBccColumns ? ` OR "cc" LIKE '%@${sanitizedDomain}%' OR "cc" LIKE '%@%.${sanitizedDomain}%' OR "bcc" LIKE '%@${sanitizedDomain}%' OR "bcc" LIKE '%@%.${sanitizedDomain}%'` : ''})`;
+      }).join(' OR ');
       
-      // Case 1: Email from user to client
-      // For each client domain
-      for (const domain of clientDomains) {
-        clientFilters.push(`("from" = ? AND "to" LIKE ?)`);
-        queryParams.push(userEmail);
-        queryParams.push(`%@${domain}`);
-      }
-      
-      // For each client email
-      for (const email of clientEmails) {
-        clientFilters.push(`("from" = ? AND "to" = ?)`);
-        queryParams.push(userEmail);
-        queryParams.push(email);
-      }
-      
-      // Case 2: Email from client to user
-      // For each client domain
-      for (const domain of clientDomains) {
-        clientFilters.push(`("from" LIKE ? AND "to" = ?)`);
-        queryParams.push(`%@${domain}`);
-        queryParams.push(userEmail);
-      }
-      
-      // For each client email
-      for (const email of clientEmails) {
-        clientFilters.push(`("from" = ? AND "to" = ?)`);
-        queryParams.push(email);
-        queryParams.push(userEmail);
-      }
-      
-      // Combine client filters
-      if (clientFilters.length > 0) {
-        conditions.push(`(${clientFilters.join(' OR ')})`);
-      }
-    } else {
-      // Fallback to original behavior if we don't have the user's email
-      const clientFilters = [];
-      
-      // Add domain conditions
-      for (const domain of clientDomains) {
-        clientFilters.push(`("from" LIKE ? OR "to" LIKE ?)`);
-        queryParams.push(`%@${domain}`);
-        queryParams.push(`%@${domain}`);
-      }
-      
-      // Add email conditions
-      for (const email of clientEmails) {
-        clientFilters.push(`("from" = ? OR "to" = ?)`);
-        queryParams.push(email);
-        queryParams.push(email);
-      }
-      
-      // Combine client filters
-      if (clientFilters.length > 0) {
-        conditions.push(`(${clientFilters.join(' OR ')})`);
+      if (domainFilters) {
+        domainConditions = ` OR (${domainFilters})`;
       }
     }
     
-    // Combine all conditions
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    // Build client email conditions with checks against both FROM and TO fields
+    const emailConditions = [];
     
-    // Query the database for client emails
+    const userEmailFromGraph = await getUserEmail();
+    if (userEmailFromGraph) {
+      const sanitizedUserEmail = userEmailFromGraph.replace(/'/g, "''");  // SQL escape single quotes
+      
+      // Add conditions for each client email
+      clientEmails.forEach(clientEmail => {
+        const sanitizedClientEmail = clientEmail.replace(/'/g, "''");  // SQL escape single quotes
+        if (hasCcBccColumns) {
+          // User to client
+          emailConditions.push(`("from" = '${sanitizedUserEmail}' AND ("to" = '${sanitizedClientEmail}' OR "cc" LIKE '%${sanitizedClientEmail}%' OR "bcc" LIKE '%${sanitizedClientEmail}%'))`);
+          // Client to user
+          emailConditions.push(`("from" = '${sanitizedClientEmail}' AND ("to" = '${sanitizedUserEmail}' OR "cc" LIKE '%${sanitizedUserEmail}%' OR "bcc" LIKE '%${sanitizedUserEmail}%'))`);
+        } else {
+          // User to client
+          emailConditions.push(`("from" = '${sanitizedUserEmail}' AND "to" = '${sanitizedClientEmail}')`);
+          // Client to user
+          emailConditions.push(`("from" = '${sanitizedClientEmail}' AND "to" = '${sanitizedUserEmail}')`);
+        }
+      });
+    }
+    
+    // Combine all email conditions
+    const emailFilter = emailConditions.length > 0 ? `(${emailConditions.join(' OR ')})` : '1=1'; // Default condition that's always true
+    
+    // Final WHERE clause combining date range, email conditions, and domain conditions
+    const whereClause = `WHERE date >= ? AND date <= ? AND (${emailFilter}${domainConditions})`;
+    
+    // Full query with proper ordering and limit
     const query = `
       SELECT * FROM messages 
       ${whereClause}
@@ -255,35 +259,20 @@ async function getClientEmailsFromDatabase(params: EmailParams) {
       LIMIT ?
     `;
     
-    queryParams.push(maxResults);
-    
     console.log('EmailFetcher - Database query:', query);
     console.log('EmailFetcher - Database query params:', queryParams);
     
+    queryParams.push(maxResults);
+    
+    // Execute the raw SQL query instead of using the ORM
     const stmt = db.connection.prepare(query);
     const emails = stmt.all(...queryParams);
     
     // Add source information to emails for weighting
-    const processedEmails = emails.map(email => {
-      let source = 'other';
-      const fromEmail = email.from || '';
-      
-      if (userEmail && fromEmail === userEmail) {
-        source = 'user'; // Email is from the user
-      } else if (
-        clientEmails.includes(fromEmail) ||
-        clientDomains.some(domain => fromEmail.endsWith(`@${domain}`))
-      ) {
-        source = 'client'; // Email is from a client
-      }
-      
-      return {
-        ...email,
-        source
-      };
-    });
-    
-    return processedEmails;
+    return emails.map((email: any) => ({
+      ...email,
+      source: 'database'
+    }));
   } catch (error) {
     console.error('EmailFetcher - Error getting emails from database:', error);
     return [];
@@ -327,7 +316,7 @@ async function getClientEmailsFromGraph(params: EmailParams) {
     // Query Graph API
     const graphResult = await client
       .api('/me/messages')
-      .select('id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,body,hasAttachments')
+      .select('id,subject,from,toRecipients,ccRecipients,bccRecipients,receivedDateTime,bodyPreview,body,hasAttachments')
       .filter(filterParts.join(' and '))
       .top(maxResults)
       .orderby('receivedDateTime desc')
@@ -346,39 +335,166 @@ async function getClientEmailsFromGraph(params: EmailParams) {
         const fromEmail = message.from?.emailAddress?.address || '';
         const toRecipients = message.toRecipients?.map(r => r.emailAddress?.address || '') || [];
         const ccRecipients = message.ccRecipients?.map(r => r.emailAddress?.address || '') || [];
-        const allRecipients = [...toRecipients, ...ccRecipients];
+        // Add BCC recipients if available (usually only visible to the sender)
+        const bccRecipients = message.bccRecipients?.map(r => r.emailAddress?.address || '') || [];
         
-        // Determine if this is a client email based on the fixed logic:
+        // All recipients combined for broader matching
+        const allRecipients = [...toRecipients, ...ccRecipients, ...bccRecipients];
         
-        // Case 1: Email from user to client
+        // Enhanced matching logic:
+        
+        // Case 1: Email from user to client (direct or CC/BCC)
         const isFromUserToClient = 
           fromEmail === userEmail && 
           (
-            clientEmails.some(email => toRecipients.includes(email)) ||
-            clientDomains.some(domain => toRecipients.some(recipient => recipient.endsWith(`@${domain}`)))
+            // Check if any client email is in any recipient field
+            clientEmails.some(email => allRecipients.includes(email)) ||
+            // Check if any client domain is in any recipient field
+            clientDomains.some(domain => 
+              allRecipients.some(recipient => recipient.endsWith(`@${domain}`))
+            )
           );
         
-        // Case 2: Email from client to user
+        // Case 2: Email from client to user (as any type of recipient)
         const isFromClientToUser = 
-          toRecipients.includes(userEmail) &&
+          allRecipients.includes(userEmail) &&
           (
+            // From email matches a client email exactly
             clientEmails.includes(fromEmail) ||
+            // From email domain matches a client domain
             clientDomains.some(domain => fromEmail.endsWith(`@${domain}`))
           );
         
-        // Case 3 (to exclude): Both user and client are recipients but from someone else (newsletters, notifications)
+        // Case 3: Partial email address matching (for when only username is different)
+        const hasPartialMatch = () => {
+          // Check client domains
+          if (clientDomains && clientDomains.length > 0) {
+            // Original domain matching logic
+            const fromDomainMatch = clientDomains.some(domain => 
+              fromEmail?.includes(`@${domain}`) || fromEmail?.endsWith(`.${domain}`));
+            
+            // Enhanced domain matching - Check if any domain is a subdomain of client domains
+            const fromSubdomainMatch = !fromDomainMatch && clientDomains.some(domain => {
+              const fromParts = fromEmail?.split('@');
+              if (fromParts && fromParts.length > 1) {
+                const fromDomain = fromParts[1];
+                return fromDomain.endsWith(`.${domain}`) || fromDomain === domain;
+              }
+              return false;
+            });
+            
+            if (fromDomainMatch || fromSubdomainMatch) {
+              return true;
+            }
+            
+            // Check recipient, cc and bcc for domain matches
+            const toDomainMatch = toRecipients?.some(addr => 
+              clientDomains.some(domain => addr.includes(`@${domain}`) || addr.endsWith(`.${domain}`)));
+            
+            const ccDomainMatch = ccRecipients?.some(addr => 
+              clientDomains.some(domain => addr.includes(`@${domain}`) || addr.endsWith(`.${domain}`)));
+            
+            const bccDomainMatch = bccRecipients?.some(addr => 
+              clientDomains.some(domain => addr.includes(`@${domain}`) || addr.endsWith(`.${domain}`)));
+            
+            if (toDomainMatch || ccDomainMatch || bccDomainMatch) {
+              return true;
+            }
+          }
+          
+          // Check for specific email matches
+          if (clientEmails && clientEmails.length > 0) {
+            // Check if from address matches any client email
+            if (clientEmails.some(email => fromEmail?.toLowerCase() === email.toLowerCase())) {
+              return true;
+            }
+            
+            // Check if any recipient matches client emails
+            if (toRecipients?.some(addr => clientEmails.some(email => addr.toLowerCase() === email.toLowerCase()))) {
+              return true;
+            }
+            
+            // Check CC recipients
+            if (ccRecipients?.some(addr => clientEmails.some(email => addr.toLowerCase() === email.toLowerCase()))) {
+              return true;
+            }
+            
+            // Check BCC recipients
+            if (bccRecipients?.some(addr => clientEmails.some(email => addr.toLowerCase() === email.toLowerCase()))) {
+              return true;
+            }
+            
+            // Check for partial matches (same domain with different username)
+            for (const clientEmail of clientEmails) {
+              const [, clientDomain] = clientEmail.split('@');
+              if (clientDomain) {
+                // Check if from email uses same domain
+                if (fromEmail?.includes(`@${clientDomain}`)) {
+                  return true;
+                }
+                
+                // Check if any recipient uses same domain
+                if (toRecipients?.some(addr => addr.includes(`@${clientDomain}`)) ||
+                    ccRecipients?.some(addr => addr.includes(`@${clientDomain}`)) ||
+                    bccRecipients?.some(addr => addr.includes(`@${clientDomain}`))) {
+                  return true;
+                }
+              }
+            }
+          }
+          
+          return false;
+        };
+        
+        // Case 4 (to exclude): Both user and client are recipients but from someone else (newsletters, notifications)
+        // We now want to include these as they may be relevant to the client
         const isNewsletter = 
           allRecipients.includes(userEmail) && 
           (
             clientEmails.some(email => allRecipients.includes(email)) ||
-            clientDomains.some(domain => allRecipients.some(recipient => recipient.endsWith(`@${domain}`)))
+            clientDomains.some(domain => 
+              allRecipients.some(recipient => recipient.endsWith(`@${domain}`))
+            )
           ) &&
           !isFromUserToClient && 
           !isFromClientToUser;
         
-        // Include only case 1 and 2, exclude newsletters/notifications (case 3)
-        return isFromUserToClient || isFromClientToUser;
+        // Include all relevant cases:
+        // - From user to client (any recipient field)
+        // - From client to user (any recipient field)
+        // - Has partial match on email domains of interest
+        // - Include newsletters/notifications when they involve the client
+        return isFromUserToClient || isFromClientToUser || hasPartialMatch() || isNewsletter;
       });
+    }
+    
+    // Enhanced logging for diagnostic purposes
+    console.log(`EmailFetcher - Graph API returned ${graphResult.value.length} emails, filtered to ${filteredResults.length}`);
+    if (filteredResults.length === 0 && graphResult.value.length > 0) {
+      // Log a sample of what emails were returned but filtered out
+      const sampleSize = Math.min(5, graphResult.value.length);
+      console.log(`EmailFetcher - Sample of filtered out emails (${sampleSize} of ${graphResult.value.length}):`);
+      
+      for (let i = 0; i < sampleSize; i++) {
+        const email = graphResult.value[i];
+        console.log(`  Email ${i+1}:`, {
+          subject: email.subject,
+          from: email.from?.emailAddress?.address,
+          to: email.toRecipients?.map(r => r.emailAddress?.address),
+          cc: email.ccRecipients?.map(r => r.emailAddress?.address),
+          receivedDateTime: email.receivedDateTime
+        });
+      }
+    }
+    
+    // Check if the table has cc and bcc columns
+    let hasCcBccColumns = false;
+    try {
+      const tableInfo = db.connection.prepare('PRAGMA table_info(messages)').all();
+      const columnNames = tableInfo.map(col => col.name);
+      hasCcBccColumns = columnNames.includes('cc') && columnNames.includes('bcc');
+    } catch (error) {
+      console.error('EmailFetcher - Error checking table schema for cc/bcc columns:', error);
     }
     
     // Convert Graph API format to our format
@@ -403,7 +519,11 @@ async function getClientEmailsFromGraph(params: EmailParams) {
         source = 'client'; // Email is from a client
       }
       
-      return {
+      // Store CC and BCC data in the appropriate fields
+      const ccStr = message.ccRecipients?.map(r => r.emailAddress?.address || '').join(', ') || '';
+      const bccStr = message.bccRecipients?.map(r => r.emailAddress?.address || '').join(', ') || '';
+      
+      const emailData: any = {
         id: message.id,
         subject: message.subject || '(No Subject)',
         from: message.from?.emailAddress?.address || '',
@@ -415,6 +535,14 @@ async function getClientEmailsFromGraph(params: EmailParams) {
         attachments: JSON.stringify([]),
         source: source // Add source field
       };
+      
+      // Add CC and BCC fields if the database supports them
+      if (hasCcBccColumns) {
+        emailData.cc = ccStr;
+        emailData.bcc = bccStr;
+      }
+      
+      return emailData;
     });
     
     // Save emails to database
@@ -438,16 +566,34 @@ async function getClientEmailsFromGraph(params: EmailParams) {
           const existing = existingStmt.get(email.id);
           
           if (!existing) {
-            // Insert email into database
-            // SQLite requires quotes around column names that are keywords
-            const insertStmt = db.connection.prepare(`
-              INSERT INTO messages (
-                id, subject, "from", "to", date, body, 
-                attachments, summary, labels, processed_for_vector
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-            `);
+            // Create columns string and values placeholders dynamically based on columns
+            const columnsArr = ['id', 'subject', 'from', 'to', 'date', 'body', 'attachments', 'summary', 'labels', 'processed_for_vector'];
+            const valuesArr = ['?', '?', '?', '?', '?', '?', '?', '?', '?', '0'];
             
-            insertStmt.run(
+            // Add cc and bcc if they exist in the schema
+            if (hasCcBccColumns && email.cc !== undefined) {
+              columnsArr.push('cc');
+              valuesArr.push('?');
+            }
+            
+            if (hasCcBccColumns && email.bcc !== undefined) {
+              columnsArr.push('bcc');
+              valuesArr.push('?');
+            }
+            
+            // Generate column string and values placeholders
+            const columnsStr = columnsArr.map(col => `"${col}"`).join(', ');
+            const valuesStr = valuesArr.join(', ');
+            
+            // Build insert SQL
+            const insertSQL = `
+              INSERT INTO messages (
+                ${columnsStr}
+              ) VALUES (${valuesStr})
+            `;
+            
+            // Build params array
+            const params = [
               email.id,
               email.subject,
               email.from,
@@ -457,7 +603,20 @@ async function getClientEmailsFromGraph(params: EmailParams) {
               email.attachments,
               email.summary,
               email.labels
-            );
+            ];
+            
+            // Add cc and bcc if they exist in the schema
+            if (hasCcBccColumns && email.cc !== undefined) {
+              params.push(email.cc);
+            }
+            
+            if (hasCcBccColumns && email.bcc !== undefined) {
+              params.push(email.bcc);
+            }
+            
+            // Execute insert
+            const insertStmt = db.connection.prepare(insertSQL);
+            insertStmt.run(...params);
             
             console.log(`EmailFetcher - Saved email with ID ${email.id} to database`);
             savedEmails.push(email.id);
