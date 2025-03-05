@@ -50,6 +50,7 @@
     "drizzle-kit": "^0.30.4",
     "eslint": "^9.21.0",
     "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
     "postcss": "^8",
     "prettier": "^3.4.2",
     "prettier-plugin-tailwindcss": "^0.6.11",
