@@ -11,6 +11,7 @@ const PROTECTED_API_PATHS = [
   '/api/search',
   '/api/feedback',
   '/api/system',
+  '/api/admin',
 ];
 
 // Check if we're in development mode

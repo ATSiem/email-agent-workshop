@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ThemeToggle, useTheme } from '~/components/theme-provider';
+import { useAuth } from '~/components/auth-provider';
+import { LoginButton } from '~/components/login-button';
 
 interface FeedbackItem {
   id: string;
@@ -39,14 +41,55 @@ export default function FeedbackAnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { darkMode } = useTheme();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
+  
+  // Function to download CSV with authentication
+  const downloadCSV = async () => {
+    try {
+      const token = sessionStorage.getItem('msGraphToken');
+      const response = await fetch('/api/admin/feedback/csv', {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to download CSV');
+      }
+      
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'feedback_export.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error downloading CSV:', err);
+      alert('Failed to download CSV data');
+    }
+  };
   
   useEffect(() => {
     async function fetchFeedback() {
       try {
-        const response = await fetch('/api/admin/feedback');
+        // Get the auth token from sessionStorage
+        const token = sessionStorage.getItem('msGraphToken');
+        
+        const response = await fetch('/api/admin/feedback', {
+          headers: {
+            'Authorization': token ? `Bearer ${token}` : '',
+            'Content-Type': 'application/json',
+          },
+        });
         
         if (!response.ok) {
-          throw new Error('Failed to fetch feedback data');
+          const errorData = await response.json().catch(() => ({}));
+          console.error('Server error:', response.status, errorData);
+          throw new Error(errorData.message || 'Failed to fetch feedback data');
         }
         
         const data = await response.json();
@@ -55,14 +98,39 @@ export default function FeedbackAnalyticsPage() {
         setStats(data.stats || null);
       } catch (err) {
         console.error('Error fetching feedback:', err);
-        setError('Failed to load feedback data');
+        setError(err instanceof Error ? err.message : 'Failed to load feedback data');
       } finally {
         setLoading(false);
       }
     }
     
-    fetchFeedback();
-  }, []);
+    if (isAuthenticated) {
+      fetchFeedback();
+    }
+  }, [isAuthenticated]);
+  
+  if (authLoading) {
+    return (
+      <div className="container mx-auto p-6">
+        <h1 className="text-2xl font-bold mb-6">Feedback Analytics</h1>
+        <div className="flex items-center justify-center h-64">
+          <p className="text-gray-500 dark:text-gray-400">Loading authentication...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  if (!isAuthenticated) {
+    return (
+      <div className="container mx-auto p-6">
+        <h1 className="text-2xl font-bold mb-6">Feedback Analytics</h1>
+        <div className="flex flex-col items-center justify-center h-64 gap-4">
+          <p className="text-gray-500 dark:text-gray-400">Please sign in to access this page</p>
+          <LoginButton />
+        </div>
+      </div>
+    );
+  }
   
   if (loading) {
     return (
@@ -93,9 +161,20 @@ export default function FeedbackAnalyticsPage() {
           <h1 className="text-2xl font-bold">Feedback Analytics</h1>
           <ThemeToggle />
         </div>
-        <Link href="/reports" className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
-          Back to Reports
-        </Link>
+        <div className="flex gap-2">
+          <button 
+            onClick={downloadCSV}
+            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center gap-2"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+            Export to CSV
+          </button>
+          <Link href="/reports" className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+            Back to Reports
+          </Link>
+        </div>
       </div>
       
       {stats && (
