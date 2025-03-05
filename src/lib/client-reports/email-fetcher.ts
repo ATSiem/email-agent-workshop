@@ -263,7 +263,27 @@ async function getClientEmailsFromDatabase(params: EmailParams) {
     const stmt = db.connection.prepare(query);
     const emails = stmt.all(...queryParams);
     
-    return emails;
+    // Add source information to emails for weighting
+    const processedEmails = emails.map(email => {
+      let source = 'other';
+      const fromEmail = email.from || '';
+      
+      if (userEmail && fromEmail === userEmail) {
+        source = 'user'; // Email is from the user
+      } else if (
+        clientEmails.includes(fromEmail) ||
+        clientDomains.some(domain => fromEmail.endsWith(`@${domain}`))
+      ) {
+        source = 'client'; // Email is from a client
+      }
+      
+      return {
+        ...email,
+        source
+      };
+    });
+    
+    return processedEmails;
   } catch (error) {
     console.error('EmailFetcher - Error getting emails from database:', error);
     return [];
@@ -370,6 +390,19 @@ async function getClientEmailsFromGraph(params: EmailParams) {
         .replace(/\\s+/g, ' ')    // Normalize whitespace
         .trim();
       
+      // Determine the source (user, client, or other)
+      let source = 'other';
+      const fromEmail = message.from?.emailAddress?.address || '';
+      
+      if (fromEmail === userEmail) {
+        source = 'user'; // Email is from the current user
+      } else if (
+        clientEmails.includes(fromEmail) ||
+        clientDomains.some(domain => fromEmail.endsWith(`@${domain}`))
+      ) {
+        source = 'client'; // Email is from a client
+      }
+      
       return {
         id: message.id,
         subject: message.subject || '(No Subject)',
@@ -379,7 +412,8 @@ async function getClientEmailsFromGraph(params: EmailParams) {
         body: body,
         summary: '',
         labels: JSON.stringify([]),
-        attachments: JSON.stringify([])
+        attachments: JSON.stringify([]),
+        source: source // Add source field
       };
     });
     
