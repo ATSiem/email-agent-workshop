@@ -88,6 +88,57 @@ When creating a report, you can:
 4. Add custom placeholders for specialized content
 5. Link templates to specific clients for quick report generation
 
+### Accessing the Admin Dashboard
+
+To access the admin dashboard for reviewing user feedback and telemetry, follow these steps:
+
+#### Authentication
+
+1. First, you need to sign in with your Microsoft account. The system is configured to only allow users with specific email domains (as configured in the environment settings).
+
+2. Navigate to the main application and use the "Sign in with Microsoft" button if you're not already authenticated.
+
+#### Accessing the Feedback Dashboard
+
+3. Once authenticated, navigate to the admin feedback dashboard by going to:
+   ```
+   /admin/feedback
+   ```
+
+4. This dashboard provides comprehensive analytics on user feedback and telemetry, including:
+   - Total reports generated
+   - Average user ratings
+   - Vector search usage percentage
+   - Average report generation time
+   - Clipboard copy rate
+   - Feedback submission rate
+   - Most common user actions
+
+#### Dashboard Features
+
+The feedback dashboard displays:
+
+- **Summary Statistics**: Key metrics in card format at the top of the page
+- **Recent Feedback**: A detailed table showing:
+  - Date of feedback
+  - Client information
+  - User ratings (1-5 stars)
+  - Vector search usage
+  - Email count
+  - Actions taken by users
+  - Feedback text/comments
+
+#### Notes
+
+- Access is restricted to users with authorized email domains (as configured in the application)
+- The data is fetched from the `/api/admin/feedback` endpoint
+- You can return to the main reports page using the "Back to Reports" link in the dashboard
+
+If you're having trouble accessing the admin dashboard, ensure:
+1. You're properly authenticated with a Microsoft account
+2. Your email domain is authorized in the system
+3. You have the necessary permissions to access admin features
+
 The AI will intelligently fill in all placeholders based on your email content, producing a comprehensive client communication report.
 
 ## Custom Placeholders
