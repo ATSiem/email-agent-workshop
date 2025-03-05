@@ -1,76 +1,95 @@
 import { z } from "zod";
 
-// Different schema for server and client side
-const serverEnvSchema = z.object({
-  // SQLite
-  SQLITE_DB_PATH: z.string().default("./data/email_agent.db"),
+// Define schema for environment variables with default values
+const envSchema = z.object({
+  // Database
+  SQLITE_DB_PATH: z.string().default('./data/email_agent.db'),
   
   // OpenAI
-  OPENAI_API_KEY: z.string().optional().default(""),
+  OPENAI_API_KEY: z.string(),
   
-  // OpenAI model selection
-  OPENAI_SUMMARY_MODEL: z.string().optional().default("gpt-3.5-turbo"),
-  OPENAI_REPORT_MODEL: z.string().optional().default("gpt-4o-2024-08-06"),
-  OPENAI_EMBEDDING_MODEL: z.string().optional().default("text-embedding-3-small"),
+  // OpenAI Model Selection
+  OPENAI_SUMMARY_MODEL: z.string().default('gpt-3.5-turbo'),
+  OPENAI_REPORT_MODEL: z.string().default('gpt-4o-2024-08-06'),
+  OPENAI_EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
   
-  // Email processing limits
-  EMAIL_FETCH_LIMIT: z.coerce.number().optional().default(1000),
-  EMAIL_PROCESSING_BATCH_SIZE: z.coerce.number().optional().default(200),
-  EMAIL_EMBEDDING_BATCH_SIZE: z.coerce.number().optional().default(200),
-  EMBEDDING_BATCH_SIZE: z.coerce.number().optional().default(20),
+  // Dynamic Model Limits
+  USE_DYNAMIC_MODEL_LIMITS: z.preprocess(
+    (val) => val === 'true' || val === true,
+    z.boolean().default(true)
+  ),
   
-  // Dynamic calculation flags
-  USE_DYNAMIC_MODEL_LIMITS: z.string().optional()
-    .transform(val => val === 'true')
-    .default('true'),
+  // Microsoft Graph API (OAuth setup)
+  NEXT_PUBLIC_AZURE_CLIENT_ID: z.string(),
+  NEXT_PUBLIC_AZURE_TENANT_ID: z.string(),
+  NEXT_PUBLIC_AZURE_REDIRECT_URI: z.string(),
   
-  // Microsoft Graph API - server-side env vars
-  AZURE_CLIENT_ID: z.string().optional().default(""),
-  AZURE_TENANT_ID: z.string().optional().default(""),
+  // Server-side Azure credentials 
+  AZURE_CLIENT_ID: z.string(),
+  AZURE_TENANT_ID: z.string(),
+  AZURE_REDIRECT_URI: z.string(),
   
-  // Public env vars
-  NEXT_PUBLIC_AZURE_CLIENT_ID: z.string().optional(),
-  NEXT_PUBLIC_AZURE_TENANT_ID: z.string().optional(),
-  NEXT_PUBLIC_AZURE_REDIRECT_URI: z.string().optional(),
+  // Webhook
+  WEBHOOK_SECRET: z.string().default('dummy-webhook-secret'),
   
-  // Webhook (still needed for backwards compatibility)
-  WEBHOOK_SECRET: z.string().default("dummy-webhook-secret"),
+  // Email Processing Limits and Batch Sizes
+  EMAIL_FETCH_LIMIT: z.preprocess(
+    (val) => val ? parseInt(String(val)) : 1000,
+    z.number().positive().default(1000)
+  ),
+  EMAIL_PROCESSING_BATCH_SIZE: z.preprocess(
+    (val) => val ? parseInt(String(val)) : 200,
+    z.number().positive().default(200)
+  ),
+  EMAIL_EMBEDDING_BATCH_SIZE: z.preprocess(
+    (val) => val ? parseInt(String(val)) : 200,
+    z.number().positive().default(200)
+  ),
+  EMBEDDING_BATCH_SIZE: z.preprocess(
+    (val) => val ? parseInt(String(val)) : 20,
+    z.number().positive().default(20)
+  ),
+  
+  // Azure Deployment (optional with defaults)
+  AZURE_WEBAPP_NAME: z.string().optional(),
+  AZURE_RESOURCE_GROUP: z.string().optional(),
+  AZURE_LOCATION: z.string().optional(),
+  SCM_DO_BUILD_DURING_DEPLOYMENT: z.preprocess(
+    (val) => val === 'true' || val === true,
+    z.boolean().default(true)
+  ),
 });
 
-// Empty client schema - we'll use NEXT_PUBLIC_ vars directly
-const clientEnvSchema = z.object({});
-
-// Create validated env object safely
-function createEnv() {
-  // For server-side usage, validate all required vars
-  if (typeof window === 'undefined') {
-    try {
-      return serverEnvSchema.parse(process.env);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        const { fieldErrors } = err.flatten();
-        const errorMessage = Object.entries(fieldErrors)
-          .map(([field, errors]) =>
-            errors ? `${field}: ${errors.join(", ")}` : field,
-          )
-          .join("\n  ");
-        console.error(`Missing server environment variables:\n  ${errorMessage}`);
-        // Return a fallback with default values
-        return serverEnvSchema.partial().parse(process.env);
-      }
-      console.error('Unknown environment validation error:', err);
-      return {} as any;
-    }
-  } 
-  // For client-side, just use the minimal set needed
-  else {
-    try {
-      return clientEnvSchema.parse(process.env);
-    } catch (err) {
-      console.error('Client environment validation error:', err);
-      return {} as any;
-    }
+// Process env variables through schema validation
+// This will throw an error if required variables are missing
+function getEnvVariables() {
+  // In production, validate all required variables
+  if (process.env.NODE_ENV === 'production') {
+    return envSchema.parse(process.env);
   }
+  
+  // In development/test, allow partial validation with defaults
+  return envSchema.partial().parse(process.env);
 }
 
-export const env = createEnv();
+// Export validated environment variables
+export const env = getEnvVariables();
+
+// Export a helper to check if running in production
+export const isProduction = process.env.NODE_ENV === 'production';
+
+// Export a helper to get URL with appropriate HTTP/HTTPS
+export function getBaseUrl() {
+  if (typeof window !== 'undefined') {
+    // Browser should use relative path
+    return '';
+  }
+  
+  if (process.env.VERCEL_URL) {
+    // SSR should use Vercel URL
+    return `https://${process.env.VERCEL_URL}`;
+  }
+  
+  // Dev SSR should use localhost
+  return `http://localhost:${process.env.PORT || 3000}`;
+}

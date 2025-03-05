@@ -108,3 +108,46 @@ You can add any placeholder that makes sense for your reporting needs, and the A
 
 ## License
 MIT
+
+## Security Measures
+
+### Environment Variables and Secrets
+
+The application uses environment variables to manage secrets and configuration. To set up your environment:
+
+1. Copy `.env.example` to `.env` in your local development environment
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Fill in your own API keys and credentials in the `.env` file
+   - Never commit the `.env` file to version control
+   - Never share your API keys or tokens
+
+3. The following safeguards are in place to prevent accidental credential exposure:
+   - `.env` files are excluded via `.gitignore`
+   - A pre-commit hook checks for potential secrets
+   - GitHub Actions workflow scans for leaked credentials
+
+### Authentication and Data Protection
+
+- All API routes are protected by authentication middleware
+- Authentication is handled via Microsoft OAuth
+- User data (emails) are only accessible to authenticated users
+- Database files are excluded from version control
+- User sessions are properly secured
+
+## Development Guidelines
+
+### Working with Environment Variables
+
+- Always use the `env` helper from `src/lib/env.ts` instead of accessing `process.env` directly
+- Mark variables that need to be available client-side with the `NEXT_PUBLIC_` prefix
+- Add new environment variables to both `.env.example` and the schema in `src/lib/env.ts`
+
+### Database and Data Handling
+
+- Local database files are stored in the `/data` directory
+- The directory is excluded from git via `.gitignore`
+- Backups of production data should be properly secured
+- Never commit database files to version control

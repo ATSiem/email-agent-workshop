@@ -13,6 +13,7 @@ const path = require('path');
 const TEST_DIR = path.join(__dirname);
 const TEST_FILE_PATTERN = /\.test\.js$/;
 const JEST_BIN = path.join(__dirname, '..', 'node_modules', '.bin', 'jest');
+const JEST_CONFIG = path.join(__dirname, 'jest.config.js');
 
 // Colors for console output
 const colors = {
@@ -37,6 +38,12 @@ if (!fs.existsSync(JEST_BIN)) {
   process.exit(1);
 }
 
+// Check if Jest config exists
+if (!fs.existsSync(JEST_CONFIG)) {
+  console.error(`${colors.red}Error: Jest configuration not found at ${JEST_CONFIG}${colors.reset}`);
+  process.exit(1);
+}
+
 // Get all test files
 const testFiles = fs.readdirSync(TEST_DIR)
   .filter(file => TEST_FILE_PATTERN.test(file))
@@ -56,10 +63,10 @@ console.log('');
 // Run tests
 let exitCode = 0;
 try {
-  console.log(`${colors.bright}${colors.magenta}Running tests...${colors.reset}\n`);
+  console.log(`${colors.bright}${colors.magenta}Running tests with config: ${JEST_CONFIG}${colors.reset}\n`);
   
-  // Run Jest with all test files
-  execSync(`${JEST_BIN} --verbose`, { 
+  // Run Jest with all test files and explicit config
+  execSync(`${JEST_BIN} --config=${JEST_CONFIG} --verbose`, { 
     stdio: 'inherit',
     env: {
       ...process.env,
