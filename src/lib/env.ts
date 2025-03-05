@@ -29,6 +29,9 @@ const envSchema = z.object({
   AZURE_TENANT_ID: z.string(),
   AZURE_REDIRECT_URI: z.string(),
   
+  // Domain restriction - optional in development, required in production
+  ALLOWED_EMAIL_DOMAIN: z.string().optional(),
+  
   // Webhook
   WEBHOOK_SECRET: z.string().default('dummy-webhook-secret'),
   
@@ -65,7 +68,11 @@ const envSchema = z.object({
 function getEnvVariables() {
   // In production, validate all required variables
   if (process.env.NODE_ENV === 'production') {
-    return envSchema.parse(process.env);
+    // In production, ALLOWED_EMAIL_DOMAIN is required
+    const productionSchema = envSchema.extend({
+      ALLOWED_EMAIL_DOMAIN: z.string().min(1, "ALLOWED_EMAIL_DOMAIN is required in production")
+    });
+    return productionSchema.parse(process.env);
   }
   
   // In development/test, allow partial validation with defaults
