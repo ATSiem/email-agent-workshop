@@ -32,6 +32,11 @@ const envSchema = z.object({
   // Domain restriction - optional in development, required in production
   ALLOWED_EMAIL_DOMAIN: z.string().optional(),
   
+  // Multiple domain restriction - alternative to ALLOWED_EMAIL_DOMAIN
+  ALLOWED_EMAIL_DOMAINS: z.string().optional().transform(domains => 
+    domains ? domains.split(',').map(d => d.trim().toLowerCase()) : undefined
+  ),
+  
   // Webhook
   WEBHOOK_SECRET: z.string().default('dummy-webhook-secret'),
   

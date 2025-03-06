@@ -53,7 +53,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     
     const emailDomain = email.split('@')[1]?.toLowerCase();
-    console.log('Email domain:', emailDomain, 'Allowed domain:', env.ALLOWED_EMAIL_DOMAIN);
+    console.log('Email domain:', emailDomain);
+    
+    // Check for multiple allowed domains first
+    if (env.ALLOWED_EMAIL_DOMAINS && env.ALLOWED_EMAIL_DOMAINS.length > 0) {
+      console.log('Checking against allowed domains:', env.ALLOWED_EMAIL_DOMAINS);
+      const isAllowed = env.ALLOWED_EMAIL_DOMAINS.includes(emailDomain);
+      console.log('Domain validation result (multiple domains):', isAllowed ? 'Allowed' : 'Denied');
+      return isAllowed;
+    }
+    
+    // Fall back to single domain check
+    console.log('Allowed single domain:', env.ALLOWED_EMAIL_DOMAIN);
     
     // If ALLOWED_EMAIL_DOMAIN is not set or empty, allow all domains
     if (!env.ALLOWED_EMAIL_DOMAIN) {
@@ -62,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     
     const isAllowed = emailDomain === env.ALLOWED_EMAIL_DOMAIN;
-    console.log('Domain validation result:', isAllowed ? 'Allowed' : 'Denied');
+    console.log('Domain validation result (single domain):', isAllowed ? 'Allowed' : 'Denied');
     return isAllowed;
   };
 
