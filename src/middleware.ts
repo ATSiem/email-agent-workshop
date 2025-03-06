@@ -59,40 +59,23 @@ export function middleware(request: NextRequest) {
     if (userEmail) {
       const emailDomain = userEmail.split('@')[1]?.toLowerCase();
       
-      // Check for multiple allowed domains first
-      if (env.ALLOWED_EMAIL_DOMAINS && env.ALLOWED_EMAIL_DOMAINS.length > 0) {
-        console.log('Email domain:', emailDomain, 'Allowed domains:', env.ALLOWED_EMAIL_DOMAINS);
-        
-        // Skip domain validation in development mode if configured
-        if (isDevelopment && env.ALLOWED_EMAIL_DOMAINS.length === 0) {
-          console.log('Development mode: skipping domain validation');
-        } else if (!env.ALLOWED_EMAIL_DOMAINS.includes(emailDomain)) {
-          console.log('Domain not allowed (multiple domains check), returning 403');
-          return NextResponse.json(
-            {
-              error: "Access denied",
-              message: `This application is restricted to users with ${env.ALLOWED_EMAIL_DOMAINS.join(' or ')} email addresses`
-            },
-            { status: 403 }
-          );
-        }
-      } else {
-        // Fall back to single domain check
-        console.log('Email domain:', emailDomain, 'Allowed domain:', env.ALLOWED_EMAIL_DOMAIN);
-        
-        // Skip domain validation in development mode if configured
-        if (isDevelopment && !env.ALLOWED_EMAIL_DOMAIN) {
-          console.log('Development mode: skipping domain validation');
-        } else if (emailDomain !== env.ALLOWED_EMAIL_DOMAIN) {
-          console.log('Domain not allowed (single domain check), returning 403');
-          return NextResponse.json(
-            {
-              error: "Access denied",
-              message: `This application is restricted to users with ${env.ALLOWED_EMAIL_DOMAIN} email addresses`
-            },
-            { status: 403 }
-          );
-        }
+      // Get allowed domains from environment variable
+      const allowedDomains = env.ALLOWED_EMAIL_DOMAINS || [];
+      
+      console.log('Email domain:', emailDomain, 'Allowed domains:', allowedDomains);
+      
+      // Skip domain validation in development mode if no domains are configured
+      if (isDevelopment && allowedDomains.length === 0) {
+        console.log('Development mode: skipping domain validation');
+      } else if (allowedDomains.length > 0 && !allowedDomains.includes(emailDomain)) {
+        console.log('Domain not allowed, returning 403');
+        return NextResponse.json(
+          {
+            error: "Access denied",
+            message: `This application is restricted to users with ${allowedDomains.join(' or ')} email addresses`
+          },
+          { status: 403 }
+        );
       }
     } else {
       console.log('No user email in request headers');

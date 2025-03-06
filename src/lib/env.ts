@@ -29,12 +29,9 @@ const envSchema = z.object({
   AZURE_TENANT_ID: z.string(),
   AZURE_REDIRECT_URI: z.string(),
   
-  // Domain restriction - optional in development, required in production
-  ALLOWED_EMAIL_DOMAIN: z.string().optional(),
-  
-  // Multiple domain restriction - alternative to ALLOWED_EMAIL_DOMAIN
+  // Domain restriction - comma-separated list of allowed email domains
   ALLOWED_EMAIL_DOMAINS: z.string().optional().transform(domains => 
-    domains ? domains.split(',').map(d => d.trim().toLowerCase()) : undefined
+    domains ? domains.split(',').map(d => d.trim().toLowerCase()) : []
   ),
   
   // Webhook
