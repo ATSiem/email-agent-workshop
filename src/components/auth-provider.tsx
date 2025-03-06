@@ -55,26 +55,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const emailDomain = email.split('@')[1]?.toLowerCase();
     console.log('Email domain:', emailDomain);
     
-    // Check for multiple allowed domains first
+    // Check for allowed domains
     if (env.ALLOWED_EMAIL_DOMAINS && env.ALLOWED_EMAIL_DOMAINS.length > 0) {
       console.log('Checking against allowed domains:', env.ALLOWED_EMAIL_DOMAINS);
       const isAllowed = env.ALLOWED_EMAIL_DOMAINS.includes(emailDomain);
-      console.log('Domain validation result (multiple domains):', isAllowed ? 'Allowed' : 'Denied');
+      console.log('Domain validation result:', isAllowed ? 'Allowed' : 'Denied');
       return isAllowed;
     }
     
-    // Fall back to single domain check
-    console.log('Allowed single domain:', env.ALLOWED_EMAIL_DOMAIN);
-    
-    // If ALLOWED_EMAIL_DOMAIN is not set or empty, allow all domains
-    if (!env.ALLOWED_EMAIL_DOMAIN) {
-      console.log('No domain restriction configured, allowing all domains');
-      return true;
-    }
-    
-    const isAllowed = emailDomain === env.ALLOWED_EMAIL_DOMAIN;
-    console.log('Domain validation result (single domain):', isAllowed ? 'Allowed' : 'Denied');
-    return isAllowed;
+    // If no domains are configured, allow all domains
+    console.log('No domain restrictions configured, allowing all domains');
+    return true;
   };
 
   // Function to add user email to request headers
@@ -130,7 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           if (!validateUserDomain(userEmail)) {
             console.error('User domain not allowed:', userEmail);
-            setError(`Access restricted to ${env.ALLOWED_EMAIL_DOMAIN} email addresses`);
+            setError(`Access restricted to ${env.ALLOWED_EMAIL_DOMAINS.join(', ')} email addresses`);
             setIsAuthenticated(false);
             sessionStorage.removeItem('msGraphToken');
             await logoutFromMicrosoft();
@@ -171,7 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               
               if (!validateUserDomain(userEmail)) {
                 console.error('User domain not allowed:', userEmail);
-                setError(`Access restricted to ${env.ALLOWED_EMAIL_DOMAIN} email addresses`);
+                setError(`Access restricted to ${env.ALLOWED_EMAIL_DOMAINS.join(', ')} email addresses`);
                 setIsAuthenticated(false);
                 sessionStorage.removeItem('msGraphToken');
                 await logoutFromMicrosoft();
@@ -205,7 +196,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             
             if (!validateUserDomain(userEmail)) {
               console.error('User domain not allowed:', userEmail);
-              setError(`Access restricted to ${env.ALLOWED_EMAIL_DOMAIN} email addresses`);
+              setError(`Access restricted to ${env.ALLOWED_EMAIL_DOMAINS.join(', ')} email addresses`);
               setIsAuthenticated(false);
               sessionStorage.removeItem('msGraphToken');
               await logoutFromMicrosoft();
