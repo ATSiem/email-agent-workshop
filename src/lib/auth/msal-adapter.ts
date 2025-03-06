@@ -6,10 +6,10 @@ let msalInstance: PublicClientApplication | null = null;
 // Base MSAL configuration
 const msalConfig: Configuration = {
   auth: {
-    clientId: process.env.NEXT_PUBLIC_AZURE_CLIENT_ID || '',
-    authority: `https://login.microsoftonline.com/${process.env.NEXT_PUBLIC_AZURE_TENANT_ID || 'common'}`,
+    clientId: process.env.NEXT_PUBLIC_CLIENT_ID || '',
+    authority: `https://login.microsoftonline.com/${process.env.NEXT_PUBLIC_TENANT_ID || 'common'}`,
     // Use the configured redirect URI from environment variables
-    redirectUri: process.env.NEXT_PUBLIC_AZURE_REDIRECT_URI,
+    redirectUri: process.env.NEXT_PUBLIC_REDIRECT_URI,
     navigateToLoginRequestUrl: true,
   },
   cache: {
