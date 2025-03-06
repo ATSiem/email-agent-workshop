@@ -14,12 +14,12 @@ jest.mock('../src/lib/env', () => {
     OPENAI_REPORT_MODEL: 'gpt-4o-2024-08-06',
     OPENAI_EMBEDDING_MODEL: 'text-embedding-3-small',
     USE_DYNAMIC_MODEL_LIMITS: true,
-    NEXT_PUBLIC_AZURE_CLIENT_ID: 'test-client-id',
-    NEXT_PUBLIC_AZURE_TENANT_ID: 'test-tenant-id',
-    NEXT_PUBLIC_AZURE_REDIRECT_URI: 'http://localhost:3000/callback',
-    AZURE_CLIENT_ID: 'test-client-id',
-    AZURE_TENANT_ID: 'test-tenant-id',
-    AZURE_REDIRECT_URI: 'http://localhost:3000/callback',
+    NEXT_PUBLIC_CLIENT_ID: 'test-client-id',
+    NEXT_PUBLIC_TENANT_ID: 'test-tenant-id',
+    NEXT_PUBLIC_REDIRECT_URI: 'http://localhost:3000/callback',
+    CLIENT_ID: 'test-client-id',
+    TENANT_ID: 'test-tenant-id',
+    REDIRECT_URI: 'http://localhost:3000/callback',
     ALLOWED_EMAIL_DOMAIN: 'example.com',
     WEBHOOK_SECRET: 'dummy-webhook-secret',
     EMAIL_FETCH_LIMIT: 1000,
@@ -74,9 +74,9 @@ describe('Environment Variable Handling', () => {
     
     // Expect env to contain the required variables
     expect(env.OPENAI_API_KEY).toBe('test-api-key');
-    expect(env.NEXT_PUBLIC_AZURE_CLIENT_ID).toBe('test-client-id');
-    expect(env.NEXT_PUBLIC_AZURE_TENANT_ID).toBe('test-tenant-id');
-    expect(env.NEXT_PUBLIC_AZURE_REDIRECT_URI).toBe('http://localhost:3000/callback');
+    expect(env.NEXT_PUBLIC_CLIENT_ID).toBe('test-client-id');
+    expect(env.NEXT_PUBLIC_TENANT_ID).toBe('test-tenant-id');
+    expect(env.NEXT_PUBLIC_REDIRECT_URI).toBe('http://localhost:3000/callback');
   });
 
   test('should provide default values for optional environment variables', () => {

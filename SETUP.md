@@ -30,9 +30,9 @@ This guide helps you set up the Email Agent with secure Microsoft OAuth authenti
    OPENAI_API_KEY=your_openai_api_key
 
    # Microsoft Graph API (OAuth)
-   AZURE_CLIENT_ID=your_client_id
-   AZURE_TENANT_ID=your_tenant_id
-   AZURE_REDIRECT_URI=http://localhost:3000/api/auth/callback
+   CLIENT_ID=your_client_id
+   TENANT_ID=your_tenant_id
+   REDIRECT_URI=http://localhost:3000/api/auth/callback
    
    # Webhook
    WEBHOOK_SECRET=some-random-string
@@ -47,8 +47,8 @@ This guide helps you set up the Email Agent with secure Microsoft OAuth authenti
 5. Under "Redirect URI", select "Web" and enter: `http://localhost:3000/api/auth/callback`
 6. Click "Register"
 7. On the app overview page, note these values:
-   - Application (client) ID - copy to AZURE_CLIENT_ID in .env
-   - Directory (tenant) ID - copy to AZURE_TENANT_ID in .env
+   - Application (client) ID - copy to CLIENT_ID in .env
+   - Directory (tenant) ID - copy to TENANT_ID in .env
 
 ## Step 3: Configure API Permissions for Delegated Access
 
