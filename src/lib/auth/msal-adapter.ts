@@ -13,8 +13,8 @@ const msalConfig: Configuration = {
     navigateToLoginRequestUrl: true,
   },
   cache: {
-    cacheLocation: 'sessionStorage',
-    storeAuthStateInCookie: false,
+    cacheLocation: 'localStorage', // Use localStorage instead of sessionStorage for persistence across browser sessions
+    storeAuthStateInCookie: true,  // Enable cookies as a fallback
   }
 };
 
@@ -93,6 +93,19 @@ export async function getAccessToken(): Promise<string | null> {
     return response.accessToken;
   } catch (e) {
     console.error('Silent token acquisition failed', e);
+    
+    // Check if it's an interaction required error
+    if (e.name === 'InteractionRequiredAuthError' || e.name === 'ClientAuthError') {
+      console.log('Interaction required for authentication, redirecting to login');
+      
+      // Instead of failing silently, redirect to authentication flow
+      // This will be triggered when the token is expired or invalid
+      await instance.acquireTokenRedirect({
+        scopes: loginScopes,
+        account: accounts[0]
+      });
+    }
+    
     return null;
   }
 }
@@ -138,5 +151,12 @@ export function clearMsalCache(): void {
     .filter(key => key.startsWith('msal.'))
     .forEach(key => {
       sessionStorage.removeItem(key);
+    });
+    
+  // Clear localStorage items related to MSAL
+  Object.keys(localStorage)
+    .filter(key => key.startsWith('msal.'))
+    .forEach(key => {
+      localStorage.removeItem(key);
     });
 }

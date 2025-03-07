@@ -72,16 +72,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const addUserEmailToHeaders = (email: string | undefined) => {
     if (typeof window !== 'undefined') {
       if (email) {
-        console.log('Storing user email in session storage:', email);
-        // Store the email in sessionStorage for use in API requests
+        console.log('Storing user email in storage:', email);
+        // Store the email in both localStorage and sessionStorage for persistence
+        localStorage.setItem('userEmail', email);
         sessionStorage.setItem('userEmail', email);
       } else {
-        console.warn('Attempted to store undefined or empty email in session storage');
+        console.warn('Attempted to store undefined or empty email in storage');
       }
       
-      // Log current session storage state for debugging
-      const storedEmail = sessionStorage.getItem('userEmail');
-      console.log('Current email in session storage after update:', storedEmail);
+      // Log current storage state for debugging
+      const storedEmail = localStorage.getItem('userEmail') || sessionStorage.getItem('userEmail');
+      console.log('Current email in storage after update:', storedEmail);
     }
   };
 
@@ -132,6 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setError(`Access restricted to ${env.ALLOWED_EMAIL_DOMAINS.join(', ')} email addresses`);
             setIsAuthenticated(false);
             sessionStorage.removeItem('msGraphToken');
+            localStorage.removeItem('msGraphToken');
             await logoutFromMicrosoft();
             setIsLoading(false);
             return;
@@ -141,7 +143,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setAccessToken(result.accessToken);
           setIsAuthenticated(true);
           
-          // Store the token in sessionStorage for Graph API use
+          // Store the token in both localStorage and sessionStorage for Graph API use
+          localStorage.setItem('msGraphToken', result.accessToken);
           sessionStorage.setItem('msGraphToken', result.accessToken);
           
           // Add user email to headers
@@ -172,6 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 console.error('User domain not allowed:', userEmail);
                 setError(`Access restricted to ${env.ALLOWED_EMAIL_DOMAINS.join(', ')} email addresses`);
                 setIsAuthenticated(false);
+                localStorage.removeItem('msGraphToken');
                 sessionStorage.removeItem('msGraphToken');
                 await logoutFromMicrosoft();
                 setIsLoading(false);
@@ -185,12 +189,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               if (token) {
                 setAccessToken(token);
                 setIsAuthenticated(true);
+                localStorage.setItem('msGraphToken', token);
                 sessionStorage.setItem('msGraphToken', token);
                 
                 // Add user email to headers
                 addUserEmailToHeaders(userEmail);
               } else {
                 setIsAuthenticated(false);
+                localStorage.removeItem('msGraphToken');
                 sessionStorage.removeItem('msGraphToken');
               }
             } else {
@@ -206,6 +212,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               console.error('User domain not allowed:', userEmail);
               setError(`Access restricted to ${env.ALLOWED_EMAIL_DOMAINS.join(', ')} email addresses`);
               setIsAuthenticated(false);
+              localStorage.removeItem('msGraphToken');
               sessionStorage.removeItem('msGraphToken');
               await logoutFromMicrosoft();
               setIsLoading(false);
@@ -219,12 +226,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (token) {
               setAccessToken(token);
               setIsAuthenticated(true);
+              localStorage.setItem('msGraphToken', token);
               sessionStorage.setItem('msGraphToken', token);
               
               // Add user email to headers
               addUserEmailToHeaders(userEmail);
             } else {
               setIsAuthenticated(false);
+              localStorage.removeItem('msGraphToken');
               sessionStorage.removeItem('msGraphToken');
             }
           }
@@ -238,6 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.error('Auth initialization error:', e);
         setError('Authentication failed. Please try again.');
         setIsAuthenticated(false);
+        localStorage.removeItem('msGraphToken');
         sessionStorage.removeItem('msGraphToken');
         
         // Clean URL even on error
@@ -260,7 +270,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       // Clear any previous state
       clearMsalCache();
+      localStorage.removeItem('msGraphToken');
       sessionStorage.removeItem('msGraphToken');
+      localStorage.removeItem('userEmail');
       sessionStorage.removeItem('userEmail');
       
       // Redirect to Microsoft login
@@ -285,7 +297,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsAuthenticated(false);
       setUser(null);
       setAccessToken(null);
+      localStorage.removeItem('msGraphToken');
       sessionStorage.removeItem('msGraphToken');
+      localStorage.removeItem('userEmail');
       sessionStorage.removeItem('userEmail');
       
       // Clear MSAL cache
@@ -301,7 +315,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsAuthenticated(false);
       setUser(null);
       setAccessToken(null);
+      localStorage.removeItem('msGraphToken');
       sessionStorage.removeItem('msGraphToken');
+      localStorage.removeItem('userEmail');
       sessionStorage.removeItem('userEmail');
       clearMsalCache();
       setIsLoading(false);
@@ -316,7 +332,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.fetch = async (input, init) => {
         // Only modify API requests to our own backend
         if (typeof input === 'string' && input.startsWith('/api/')) {
-          const userEmail = sessionStorage.getItem('userEmail');
+          // Try localStorage first, fall back to sessionStorage
+          const userEmail = localStorage.getItem('userEmail') || sessionStorage.getItem('userEmail');
           console.log('Adding user email to API request:', userEmail);
           
           // Create new headers object with the user email

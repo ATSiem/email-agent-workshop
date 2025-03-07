@@ -4,16 +4,28 @@
 import { Client } from '@microsoft/microsoft-graph-client';
 
 // This will be filled by the auth system with a token
-// We'll use sessionStorage to persist the token across page refreshes
+// We'll use localStorage to persist the token across browser sessions
 const getPersistedToken = (): string | null => {
   if (typeof window !== 'undefined') {
     try {
-      // Try to get token from sessionStorage
-      const token = sessionStorage.getItem('msGraphToken');
-      console.log('Token retrieved from sessionStorage:', token ? 'present' : 'missing');
+      // Try to get token from localStorage
+      const token = localStorage.getItem('msGraphToken');
+      console.log('Token retrieved from localStorage:', token ? 'present' : 'missing');
+      
+      // Fallback to sessionStorage if not found in localStorage (backward compatibility)
+      if (!token) {
+        const sessionToken = sessionStorage.getItem('msGraphToken');
+        if (sessionToken) {
+          console.log('Token retrieved from sessionStorage (fallback):', 'present');
+          // Move from sessionStorage to localStorage
+          localStorage.setItem('msGraphToken', sessionToken);
+          return sessionToken;
+        }
+      }
+      
       return token;
     } catch (error) {
-      console.error('Error accessing sessionStorage:', error);
+      console.error('Error accessing storage:', error);
       return null;
     }
   }
@@ -24,14 +36,18 @@ const saveTokenToStorage = (token: string | null) => {
   if (typeof window !== 'undefined') {
     try {
       if (token) {
-        console.log('Saving token to sessionStorage');
+        console.log('Saving token to localStorage');
+        localStorage.setItem('msGraphToken', token);
+        
+        // Also save to sessionStorage for backward compatibility
         sessionStorage.setItem('msGraphToken', token);
       } else {
-        console.log('Removing token from sessionStorage');
+        console.log('Removing token from storage');
+        localStorage.removeItem('msGraphToken');
         sessionStorage.removeItem('msGraphToken');
       }
     } catch (error) {
-      console.error('Error accessing sessionStorage:', error);
+      console.error('Error accessing storage:', error);
     }
   }
 };
