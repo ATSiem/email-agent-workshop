@@ -55,9 +55,12 @@ export const ClientList = forwardRef<{ refreshClients: () => Promise<void> }, Cl
         const userEmail = typeof window !== 'undefined' ? sessionStorage.getItem('userEmail') : null;
         if (userEmail) {
           console.log('Adding user email to API request:', userEmail);
+        } else {
+          console.warn('ClientList - No user email found in session storage');
         }
         
         // Fetch clients from API
+        console.log('ClientList - Sending API request to /api/clients');
         const response = await fetch('/api/clients', {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -74,17 +77,41 @@ export const ClientList = forwardRef<{ refreshClients: () => Promise<void> }, Cl
           throw new Error('Authentication required. Please sign in again.');
         }
         
+        if (response.status === 403) {
+          setAuthError(true);
+          throw new Error('Access denied. You do not have permission to view clients.');
+        }
+        
         if (!response.ok) {
           const errorData = await response.json();
           console.error('ClientList - Error response:', errorData);
-          throw new Error(errorData.error || 'Failed to fetch clients');
+          throw new Error(errorData.error || errorData.message || 'Failed to fetch clients');
         }
         
-        const data = await response.json();
-        console.log('ClientList - Response data:', data);
+        // Get the response text first for debugging
+        const responseText = await response.text();
+        console.log('ClientList - Raw response:', responseText);
+        
+        // Parse the JSON response
+        let data;
+        try {
+          data = JSON.parse(responseText);
+          console.log('ClientList - Parsed response data:', data);
+        } catch (parseError) {
+          console.error('ClientList - Error parsing response JSON:', parseError);
+          throw new Error('Invalid response format from server');
+        }
         
         // Store clients in state and also in localStorage as a backup
         const clientsData = data.clients || [];
+        
+        // Ensure clientsData is an array
+        if (!Array.isArray(clientsData)) {
+          console.error('ClientList - clients is not an array:', clientsData);
+          throw new Error('Server returned invalid client data format');
+        }
+        
+        console.log('ClientList - Setting clients state with:', clientsData);
         setClients(clientsData);
         
         // Save to localStorage as a backup
@@ -115,6 +142,7 @@ export const ClientList = forwardRef<{ refreshClients: () => Promise<void> }, Cl
         }
       } finally {
         setLoading(false);
+        console.log('ClientList - Refreshing client list completed');
       }
     }, [clients.length, lastRefreshTime]);
     

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "~/lib/db";
 import { getUserAccessToken, setUserAccessToken } from "~/lib/auth/microsoft";
+import { clients } from "~/lib/db/pg-schema"; // Import the clients table schema
 
 // Schema for creating/updating a client
 const clientSchema = z.object({
@@ -14,18 +15,15 @@ export async function GET(request: Request) {
   try {
     // Authentication check
     const authHeader = request.headers.get('Authorization');
-    let accessToken = authHeader ? authHeader.replace('Bearer ', '') : null;
-    
     console.log('Clients API - Auth header present:', !!authHeader);
     
+    let accessToken = authHeader ? authHeader.replace('Bearer ', '') : null;
+    
     if (!accessToken) {
-      console.log('Clients API - No auth header, trying getUserAccessToken()');
       accessToken = getUserAccessToken();
-      console.log('Clients API - Token from getUserAccessToken:', accessToken ? 'present' : 'missing');
     }
     
     if (!accessToken) {
-      console.log('Clients API - No token found, returning 401');
       return NextResponse.json(
         { 
           error: "Authentication required",
@@ -36,22 +34,31 @@ export async function GET(request: Request) {
     }
     
     // Set the token for Graph API calls that might happen later
-    console.log('Clients API - Setting user access token');
     setUserAccessToken(accessToken);
+    
+    // Check if we're using Postgres
+    const usePostgres = process.env.NODE_ENV === 'production' || process.env.DATABASE_TYPE === 'postgres';
+    console.log('Clients API - Using Postgres:', usePostgres);
     
     // Ensure the clients table exists
     try {
       console.log('Clients API - Ensuring clients table exists');
-      db.connection.prepare(`
-        CREATE TABLE IF NOT EXISTS clients (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          domains TEXT NOT NULL,
-          emails TEXT NOT NULL,
-          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-        )
-      `).run();
+      if (usePostgres) {
+        // For Postgres, we don't need to create tables here as they should be created during deployment
+        console.log('Clients API - Using Postgres, skipping table creation');
+      } else {
+        // For SQLite, create the table if it doesn't exist
+        db.connection.prepare(`
+          CREATE TABLE IF NOT EXISTS clients (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            domains TEXT NOT NULL,
+            emails TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+          )
+        `).run();
+      }
       console.log('Clients API - Clients table check completed');
     } catch (tableError) {
       console.error('Clients API - Error ensuring clients table exists:', tableError);
@@ -122,11 +129,15 @@ export async function GET(request: Request) {
             }
           });
           
-          console.log('Clients API - Returning formatted clients');
+          console.log('Clients API - Returning formatted clients:', formattedClients.length);
           return NextResponse.json({ clients: formattedClients });
         } catch (dbError) {
           console.error("Database query error:", dbError);
-          return NextResponse.json({ clients: [] });
+          return NextResponse.json({ 
+            clients: [],
+            error: "Database query error",
+            message: dbError.message || "Failed to query clients"
+          });
         }
       }
     } catch (dbError) {
@@ -136,20 +147,25 @@ export async function GET(request: Request) {
       // This prevents showing "Failed to fetch clients" for new users
       if (!clientId) {
         console.log('Clients API - Database error but returning empty clients array for better UX');
-        return NextResponse.json({ clients: [] });
+        return NextResponse.json({ 
+          clients: [],
+          warning: "Database error occurred, but returning empty array",
+          message: dbError.message || "Database error"
+        });
       }
       
       // For specific client requests, we still need to return an error
       throw dbError;
     }
   } catch (error) {
-    console.error("Error fetching clients:", error);
-    console.error("Error details:", error instanceof Error ? error.message : 'Unknown error');
-    if (error instanceof Error && error.stack) {
-      console.error("Stack trace:", error.stack);
-    }
+    console.error("Clients API - Unhandled error:", error);
+    
     return NextResponse.json(
-      { error: "Failed to fetch clients" },
+      { 
+        error: "Failed to fetch clients",
+        message: error.message || "Unknown error occurred",
+        stack: process.env.NODE_ENV !== 'production' ? error.stack : undefined
+      },
       { status: 500 }
     );
   }
@@ -157,33 +173,15 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    console.log('POST /api/clients - Request received');
-    
     // Authentication check
     const authHeader = request.headers.get('Authorization');
     let accessToken = authHeader ? authHeader.replace('Bearer ', '') : null;
     
-    console.log('POST /api/clients - Auth header present:', !!authHeader);
-    
-    // Log all headers for debugging (excluding Authorization token)
-    const headers = {};
-    request.headers.forEach((value, key) => {
-      if (key.toLowerCase() === 'authorization') {
-        headers[key] = 'Bearer [redacted]';
-      } else {
-        headers[key] = value;
-      }
-    });
-    console.log('POST /api/clients - Request headers:', JSON.stringify(headers, null, 2));
-    
     if (!accessToken) {
-      console.log('POST /api/clients - No auth header, trying getUserAccessToken()');
       accessToken = getUserAccessToken();
-      console.log('POST /api/clients - Token from getUserAccessToken:', accessToken ? 'present' : 'missing');
     }
     
     if (!accessToken) {
-      console.log('POST /api/clients - No token found, returning 401');
       return NextResponse.json(
         { 
           error: "Authentication required",
@@ -194,22 +192,33 @@ export async function POST(request: Request) {
     }
     
     // Set the token for Graph API calls that might happen later
-    console.log('POST /api/clients - Setting user access token');
     setUserAccessToken(accessToken);
+    
+    console.log('POST /api/clients - Request received');
+    
+    // Check if we're using Postgres
+    const usePostgres = process.env.NODE_ENV === 'production' || process.env.DATABASE_TYPE === 'postgres';
+    console.log('POST /api/clients - Using Postgres:', usePostgres);
     
     // Ensure the clients table exists
     try {
       console.log('POST /api/clients - Ensuring clients table exists');
-      db.connection.prepare(`
-        CREATE TABLE IF NOT EXISTS clients (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          domains TEXT NOT NULL,
-          emails TEXT NOT NULL,
-          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-        )
-      `).run();
+      if (usePostgres) {
+        // For Postgres, we don't need to create tables here as they should be created during deployment
+        console.log('POST /api/clients - Using Postgres, skipping table creation');
+      } else {
+        // For SQLite, create the table if it doesn't exist
+        db.connection.prepare(`
+          CREATE TABLE IF NOT EXISTS clients (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            domains TEXT NOT NULL,
+            emails TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+          )
+        `).run();
+      }
       console.log('POST /api/clients - Clients table check completed');
     } catch (tableError) {
       console.error('POST /api/clients - Error ensuring clients table exists:', tableError);
@@ -245,49 +254,75 @@ export async function POST(request: Request) {
       
       // Insert the new client
       console.log('POST /api/clients - Preparing database insert');
-      let stmt;
-      try {
-        stmt = db.connection.prepare(`
-          INSERT INTO clients (id, name, domains, emails, created_at, updated_at)
-          VALUES (?, ?, ?, ?, unixepoch(), unixepoch())
-        `);
-      } catch (prepareError) {
-        console.error('POST /api/clients - Failed to prepare SQL statement:', prepareError);
-        return NextResponse.json(
-          { 
-            error: "Database error", 
-            message: "Failed to prepare database statement",
-            details: prepareError.message
-          },
-          { status: 500 }
-        );
-      }
       
-      console.log('POST /api/clients - Executing database insert with values:', {
-        id: clientId,
-        name: data.name,
-        domains: JSON.stringify(data.domains),
-        emails: JSON.stringify(data.emails)
-      });
-      
-      try {
-        stmt.run(
-          clientId,
-          data.name,
-          JSON.stringify(data.domains),
-          JSON.stringify(data.emails)
-        );
-        console.log('POST /api/clients - Database insert successful');
-      } catch (dbError) {
-        console.error('POST /api/clients - Database insert error:', dbError);
-        return NextResponse.json(
-          { 
-            error: "Database error", 
-            message: "Failed to insert client into database",
-            details: dbError.message
-          },
-          { status: 500 }
-        );
+      if (usePostgres) {
+        // Use Postgres-compatible syntax
+        try {
+          console.log('POST /api/clients - Using Postgres insert');
+          await db.insert(clients).values({
+            id: clientId,
+            name: data.name,
+            domains: JSON.stringify(data.domains),
+            emails: JSON.stringify(data.emails),
+          });
+          console.log('POST /api/clients - Postgres insert successful');
+        } catch (pgError) {
+          console.error('POST /api/clients - Postgres insert error:', pgError);
+          return NextResponse.json(
+            { 
+              error: "Database error", 
+              message: "Failed to insert client into Postgres database",
+              details: pgError.message
+            },
+            { status: 500 }
+          );
+        }
+      } else {
+        // Use SQLite syntax
+        let stmt;
+        try {
+          stmt = db.connection.prepare(`
+            INSERT INTO clients (id, name, domains, emails, created_at, updated_at)
+            VALUES (?, ?, ?, ?, unixepoch(), unixepoch())
+          `);
+        } catch (prepareError) {
+          console.error('POST /api/clients - Failed to prepare SQL statement:', prepareError);
+          return NextResponse.json(
+            { 
+              error: "Database error", 
+              message: "Failed to prepare database statement",
+              details: prepareError.message
+            },
+            { status: 500 }
+          );
+        }
+        
+        console.log('POST /api/clients - Executing database insert with values:', {
+          id: clientId,
+          name: data.name,
+          domains: JSON.stringify(data.domains),
+          emails: JSON.stringify(data.emails)
+        });
+        
+        try {
+          stmt.run(
+            clientId,
+            data.name,
+            JSON.stringify(data.domains),
+            JSON.stringify(data.emails)
+          );
+          console.log('POST /api/clients - Database insert successful');
+        } catch (dbError) {
+          console.error('POST /api/clients - Database insert error:', dbError);
+          return NextResponse.json(
+            { 
+              error: "Database error", 
+              message: "Failed to insert client into database",
+              details: dbError.message
+            },
+            { status: 500 }
+          );
+        }
       }
       
       console.log('POST /api/clients - Returning success response');
