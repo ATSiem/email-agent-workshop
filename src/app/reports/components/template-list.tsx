@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronDown as ChevronDownIcon, ChevronUp as ChevronUpIcon } from 'lucide-react';
 import { useAuth } from '~/components/auth-provider';
+import { getUserAccessToken } from '~/lib/auth/microsoft';
 
 interface Template {
   id: string;
@@ -29,8 +30,8 @@ export function TemplateList({ onSelectTemplate }: TemplateListProps) {
       setIsLoading(true);
       setError('');
       
-      // Get token from sessionStorage for authentication
-      const token = sessionStorage.getItem('msGraphToken');
+      // Get token using getUserAccessToken instead of directly from sessionStorage
+      const token = getUserAccessToken();
       
       const response = await fetch('/api/templates', {
         headers: token ? {
@@ -117,8 +118,8 @@ export function TemplateList({ onSelectTemplate }: TemplateListProps) {
     }
     
     try {
-      // Get token from sessionStorage for authentication
-      const token = sessionStorage.getItem('msGraphToken');
+      // Get token using getUserAccessToken instead of directly from sessionStorage
+      const token = getUserAccessToken();
       
       const response = await fetch(`/api/templates?id=${templateId}`, {
         method: 'DELETE',

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ThemeToggle, useTheme } from '~/components/theme-provider';
 import { useAuth } from '~/components/auth-provider';
 import { LoginButton } from '~/components/login-button';
+import { getUserAccessToken } from '~/lib/auth/microsoft';
 
 interface FeedbackItem {
   id: string;
@@ -46,7 +47,7 @@ export default function FeedbackAnalyticsPage() {
   // Function to download CSV with authentication
   const downloadCSV = async () => {
     try {
-      const token = sessionStorage.getItem('msGraphToken');
+      const token = getUserAccessToken();
       const response = await fetch('/api/admin/feedback/csv', {
         headers: {
           'Authorization': token ? `Bearer ${token}` : '',
@@ -76,8 +77,8 @@ export default function FeedbackAnalyticsPage() {
   useEffect(() => {
     async function fetchFeedback() {
       try {
-        // Get the auth token from sessionStorage
-        const token = sessionStorage.getItem('msGraphToken');
+        // Get the auth token using getUserAccessToken
+        const token = getUserAccessToken();
         
         const response = await fetch('/api/admin/feedback', {
           headers: {

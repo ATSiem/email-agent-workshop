@@ -9,6 +9,7 @@ import { ClientList } from './components/client-list';
 import { TemplateList } from './components/template-list';
 import Link from 'next/link';
 import { ThemeToggle } from '~/components/theme-provider';
+import { getUserAccessToken } from '~/lib/auth/microsoft';
 
 export function ClientPage() {
   const [activeView, setActiveView] = useState('clients'); // 'clients', 'templates', 'generate'
@@ -42,7 +43,7 @@ export function ClientPage() {
   // Fetch clients and select the first one if none is selected
   const fetchClients = async () => {
     try {
-      const token = sessionStorage.getItem('msGraphToken');
+      const token = getUserAccessToken();
       
       const response = await fetch('/api/clients', {
         headers: token ? {
