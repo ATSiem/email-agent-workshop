@@ -12,10 +12,30 @@ let db: ReturnType<typeof drizzle>;
 // This initialization will only run on the server
 if (typeof window === 'undefined') {
   try {
-    // Ensure directory exists
+    // Ensure directory exists with better error handling
     const dbDir = dirname(env.SQLITE_DB_PATH);
-    if (!existsSync(dbDir)) {
-      mkdirSync(dbDir, { recursive: true });
+    try {
+      if (!existsSync(dbDir)) {
+        console.log(`Creating database directory: ${dbDir}`);
+        mkdirSync(dbDir, { recursive: true });
+      }
+    } catch (dirError) {
+      console.warn(`Failed to create directory ${dbDir}, will try alternative path:`, dirError);
+      
+      // In Vercel environment, try using /tmp directory as fallback
+      if (process.env.VERCEL) {
+        env.SQLITE_DB_PATH = '/tmp/data/email_agent.db';
+        
+        // Ensure /tmp/data exists
+        try {
+          if (!existsSync('/tmp/data')) {
+            console.log('Creating /tmp/data directory');
+            mkdirSync('/tmp/data', { recursive: true });
+          }
+        } catch (tmpDirError) {
+          console.error('Failed to create /tmp/data directory:', tmpDirError);
+        }
+      }
     }
 
     // Log the database path for debugging
@@ -58,6 +78,7 @@ if (typeof window === 'undefined') {
         client_id TEXT,
         created_at INTEGER NOT NULL DEFAULT (unixepoch()),
         updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        example_prompt TEXT,
         FOREIGN KEY (client_id) REFERENCES clients(id)
       );
       
@@ -124,6 +145,7 @@ if (typeof window === 'undefined') {
       console.warn('SQLite create_function method not available - vector search functionality will be limited');
     }
     
+    // Initialize the drizzle ORM
     db = drizzle(sqlite, { schema });
     // @ts-ignore - adding the connection property for raw SQL access
     db.connection = sqlite;
@@ -144,7 +166,46 @@ if (typeof window === 'undefined') {
     }
   } catch (error) {
     console.error("Database initialization error:", error);
-    // Provide a fallback db object
+    
+    // Try to create a fallback database in /tmp for Vercel
+    if (process.env.VERCEL) {
+      try {
+        console.log('Attempting to create fallback database in /tmp');
+        
+        // Ensure /tmp/data exists
+        if (!existsSync('/tmp/data')) {
+          mkdirSync('/tmp/data', { recursive: true });
+        }
+        
+        const fallbackPath = '/tmp/data/email_agent.db';
+        console.log('Using fallback database path:', fallbackPath);
+        
+        const sqlite = new Database(fallbackPath);
+        db = drizzle(sqlite, { schema });
+        // @ts-ignore - adding the connection property for raw SQL access
+        db.connection = sqlite;
+        
+        // Create minimal tables
+        sqlite.exec(`
+          CREATE TABLE IF NOT EXISTS clients (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            domains TEXT NOT NULL,
+            emails TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+          );
+        `);
+        
+        console.log('Fallback database initialized successfully');
+        return;
+      } catch (fallbackError) {
+        console.error('Failed to create fallback database:', fallbackError);
+      }
+    }
+    
+    // Last resort: in-memory database
+    console.log('Using in-memory database as last resort');
     const sqlite = new Database(':memory:');
     db = drizzle(sqlite, { schema });
     // @ts-ignore - adding the connection property for raw SQL access

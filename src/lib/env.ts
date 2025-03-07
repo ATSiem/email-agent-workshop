@@ -1,9 +1,20 @@
 import { z } from "zod";
 
+// Helper to determine if running in Vercel environment
+const isVercel = process.env.VERCEL === '1';
+
+// Define default database path based on environment
+const getDefaultDbPath = () => {
+  if (isVercel) {
+    return '/tmp/data/email_agent.db';
+  }
+  return './data/email_agent.db';
+};
+
 // Define schema for environment variables with default values
 const envSchema = z.object({
   // Database
-  SQLITE_DB_PATH: z.string().default('./data/email_agent.db'),
+  SQLITE_DB_PATH: z.string().default(getDefaultDbPath()),
   
   // OpenAI
   OPENAI_API_KEY: z.string(),
@@ -77,6 +88,9 @@ export const env = getEnvVariables();
 
 // Export a helper to check if running in production
 export const isProduction = process.env.NODE_ENV === 'production';
+
+// Export a helper to check if running in Vercel
+export const isVercelEnv = isVercel;
 
 // Export a helper to get URL with appropriate HTTP/HTTPS
 export function getBaseUrl() {
