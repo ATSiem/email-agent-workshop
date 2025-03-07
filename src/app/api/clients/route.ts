@@ -39,6 +39,25 @@ export async function GET(request: Request) {
     console.log('Clients API - Setting user access token');
     setUserAccessToken(accessToken);
     
+    // Ensure the clients table exists
+    try {
+      console.log('Clients API - Ensuring clients table exists');
+      db.connection.prepare(`
+        CREATE TABLE IF NOT EXISTS clients (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          domains TEXT NOT NULL,
+          emails TEXT NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )
+      `).run();
+      console.log('Clients API - Clients table check completed');
+    } catch (tableError) {
+      console.error('Clients API - Error ensuring clients table exists:', tableError);
+      // Continue with the request, as the table might already exist
+    }
+    
     // Get client ID from URL if provided (for single client fetch)
     const url = new URL(request.url);
     const clientId = url.searchParams.get('id');
@@ -155,6 +174,25 @@ export async function POST(request: Request) {
     // Set the token for Graph API calls that might happen later
     console.log('POST /api/clients - Setting user access token');
     setUserAccessToken(accessToken);
+    
+    // Ensure the clients table exists
+    try {
+      console.log('POST /api/clients - Ensuring clients table exists');
+      db.connection.prepare(`
+        CREATE TABLE IF NOT EXISTS clients (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          domains TEXT NOT NULL,
+          emails TEXT NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )
+      `).run();
+      console.log('POST /api/clients - Clients table check completed');
+    } catch (tableError) {
+      console.error('POST /api/clients - Error ensuring clients table exists:', tableError);
+      // Continue with the request, as the table might already exist
+    }
     
     // Parse and validate the request body
     console.log('POST /api/clients - Parsing request body');
@@ -298,6 +336,25 @@ export async function PUT(request: Request) {
     
     // Set the token for Graph API calls that might happen later
     setUserAccessToken(accessToken);
+    
+    // Ensure the clients table exists
+    try {
+      console.log('PUT /api/clients - Ensuring clients table exists');
+      db.connection.prepare(`
+        CREATE TABLE IF NOT EXISTS clients (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          domains TEXT NOT NULL,
+          emails TEXT NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+        )
+      `).run();
+      console.log('PUT /api/clients - Clients table check completed');
+    } catch (tableError) {
+      console.error('PUT /api/clients - Error ensuring clients table exists:', tableError);
+      // Continue with the request, as the table might already exist
+    }
     
     // Get client ID from URL
     const url = new URL(request.url);

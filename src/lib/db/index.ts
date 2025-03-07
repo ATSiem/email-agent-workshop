@@ -18,6 +18,9 @@ if (typeof window === 'undefined') {
       mkdirSync(dbDir, { recursive: true });
     }
 
+    // Log the database path for debugging
+    console.log('Database path:', env.SQLITE_DB_PATH);
+    
     // Create SQLite connection
     const sqlite = new Database(env.SQLITE_DB_PATH);
     

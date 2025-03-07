@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # Create necessary directories
-mkdir -p data
-touch data/email_agent.db
+mkdir -p /tmp/data
+touch /tmp/data/email_agent.db
 
 # Initialize SQLite database with minimal structure
 echo "Creating minimal database structure for production..."
-sqlite3 data/email_agent.db <<EOF
+sqlite3 /tmp/data/email_agent.db <<EOF
 CREATE TABLE IF NOT EXISTS clients (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
