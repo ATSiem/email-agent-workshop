@@ -293,92 +293,135 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
       // Get user email from session storage for debugging
       const userEmail = typeof window !== 'undefined' ? sessionStorage.getItem('userEmail') : null;
       
-      const response = await fetch('/api/summarize', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          ...(userEmail ? { 'X-User-Email': userEmail } : {})
-        },
-        body: JSON.stringify({
-          startDate,
-          endDate,
-          format: format,
-          clientId: selectedClientId,
-          saveName,
-          examplePrompt,
-          searchQuery,
-          useVectorSearch,
-          reportId: newReportId,
-        }),
-      });
+      // Set a timeout for the fetch request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
       
-      const endTime = performance.now();
-      const totalTime = Math.round(endTime - startTime);
-      setGenerationTimeMs(totalTime);
-      
-      console.log('ReportGenerator - Response received with status:', response.status);
-      
-      // Handle 404 specifically (no emails found)
-      if (response.status === 404) {
-        throw new Error('No emails found for the selected client and date range.');
-      }
-      
-      // Handle 401 specifically (authentication issues)
-      if (response.status === 401) {
-        throw new Error('Authentication required. Please sign in again.');
-      }
-      
-      let data;
       try {
-        const responseText = await response.text();
-        try {
-          data = JSON.parse(responseText);
-          console.log('ReportGenerator - Response data:', data);
-        } catch (parseError) {
-          console.error('ReportGenerator - Failed to parse response as JSON:', responseText);
-          throw new Error('Invalid response format from server');
+        const response = await fetch('/api/summarize', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            ...(userEmail ? { 'X-User-Email': userEmail } : {})
+          },
+          body: JSON.stringify({
+            startDate,
+            endDate,
+            format: format,
+            clientId: selectedClientId,
+            saveName,
+            examplePrompt,
+            searchQuery,
+            useVectorSearch,
+            reportId: newReportId,
+          }),
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        const endTime = performance.now();
+        const totalTime = Math.round(endTime - startTime);
+        setGenerationTimeMs(totalTime);
+        
+        console.log('ReportGenerator - Response received with status:', response.status);
+        
+        // Handle 404 specifically (no emails found)
+        if (response.status === 404) {
+          throw new Error('No emails found for the selected client and date range.');
         }
-      } catch (responseError) {
-        console.error('ReportGenerator - Error reading response:', responseError);
-        throw new Error('Failed to read response from server');
-      }
-      
-      if (!response.ok) {
-        console.error('ReportGenerator - Error response:', data);
-        throw new Error(data?.error || data?.message || `Failed to generate report (${response.status})`);
-      }
-      
-      if (!data || !data.report) {
-        console.error('ReportGenerator - Missing report data in response');
-        throw new Error('Server returned an empty report');
-      }
-      
-      console.log('ReportGenerator - Generated report data:', data);
-      setGeneratedReport(data.report);
-      setReportHighlights(data.highlights || []);
-      setEmailCount(data.emailCount || 0);
-      
-      // Check if any emails came from Graph API
-      if (data.fromGraphApi) {
-        console.log('Report includes emails from Microsoft Graph API');
-        setFromGraphApi(true);
-      } else {
-        setFromGraphApi(false);
-      }
-      
-      // Show feedback prompt after 10 seconds to allow user to read the report
-      setTimeout(() => {
-        setShowFeedback(true);
-      }, 10000);
-      
-      // Notify parent component if callback provided
-      if (onReportGenerated) {
-        onReportGenerated();
+        
+        // Handle 401 specifically (authentication issues)
+        if (response.status === 401) {
+          throw new Error('Authentication required. Please sign in again.');
+        }
+        
+        // Handle 504 specifically (timeout issues)
+        if (response.status === 504) {
+          throw new Error('The request timed out. Please try again with a smaller date range or fewer emails.');
+        }
+        
+        let data;
+        let responseText;
+        
+        try {
+          responseText = await response.text();
+          try {
+            data = JSON.parse(responseText);
+            console.log('ReportGenerator - Response data:', data);
+          } catch (parseError) {
+            console.error('ReportGenerator - Failed to parse response as JSON:', responseText);
+            throw new Error('Invalid response format from server. Please try again or contact support.');
+          }
+        } catch (responseError) {
+          console.error('ReportGenerator - Error reading response:', responseError);
+          throw new Error('Failed to read response from server. Please try again or contact support.');
+        }
+        
+        if (!response.ok) {
+          console.error('ReportGenerator - Error response:', data);
+          
+          // Provide more specific error messages based on the error
+          if (data?.error?.includes('OpenAI API')) {
+            throw new Error(`OpenAI API error: ${data.message || data.error || 'Unknown error'}`);
+          }
+          
+          throw new Error(data?.message || data?.error || `Failed to generate report (${response.status})`);
+        }
+        
+        if (!data || !data.report) {
+          console.error('ReportGenerator - Missing report data in response');
+          throw new Error('Server returned an empty report. Please try again.');
+        }
+        
+        console.log('ReportGenerator - Generated report data:', data);
+        setGeneratedReport(data.report);
+        setReportHighlights(data.highlights || []);
+        setEmailCount(data.emailCount || 0);
+        
+        // Check if any emails came from Graph API
+        if (data.fromGraphApi) {
+          console.log('Report includes emails from Microsoft Graph API');
+          setFromGraphApi(true);
+        } else {
+          setFromGraphApi(false);
+        }
+        
+        // Show feedback prompt after 10 seconds to allow user to read the report
+        setTimeout(() => {
+          setShowFeedback(true);
+        }, 10000);
+        
+        // Notify parent component if callback provided
+        if (onReportGenerated) {
+          onReportGenerated();
+        }
+      } catch (fetchError) {
+        if (fetchError.name === 'AbortError') {
+          throw new Error('The request took too long to complete. Please try again with a smaller date range.');
+        }
+        throw fetchError;
       }
     } catch (err) {
       console.error('ReportGenerator - Error generating report:', err);
-      setError(err.message || 'An error occurred while generating the report');
+      
+      // Provide more helpful error messages
+      let errorMessage = err.message || 'An error occurred while generating the report';
+      
+      // Add suggestions for common errors
+      if (errorMessage.includes('Failed to read response from server')) {
+        errorMessage += '\n\nThis could be due to a timeout or server error. Try:\n' +
+                        '1. Selecting a smaller date range\n' +
+                        '2. Using a simpler report template\n' +
+                        '3. Trying again in a few minutes';
+      } else if (errorMessage.includes('OpenAI API')) {
+        errorMessage += '\n\nThere may be an issue with the OpenAI API. Please contact the administrator.';
+      } else if (errorMessage.includes('timed out')) {
+        errorMessage += '\n\nTry selecting a smaller date range or using a simpler report template.';
+      }
+      
+      setError(errorMessage);
     } finally {
       setIsGenerating(false);
     }

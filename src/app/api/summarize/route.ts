@@ -55,10 +55,34 @@ export async function POST(request: Request) {
     console.log('Summarize API - Setting user access token');
     setUserAccessToken(accessToken);
     
+    // Verify OpenAI API key is available
+    if (!env.OPENAI_API_KEY) {
+      console.error('Summarize API - OpenAI API key is missing');
+      return NextResponse.json(
+        { 
+          error: "OpenAI API key is missing",
+          message: "The server is missing the OpenAI API key. Please contact the administrator."
+        },
+        { status: 500 }
+      );
+    }
+    
     // Parse and validate the request body
     console.log('Summarize API - Parsing request body');
-    const body = await request.json();
-    console.log('Summarize API - Request body:', JSON.stringify(body));
+    let body;
+    try {
+      body = await request.json();
+      console.log('Summarize API - Request body:', JSON.stringify(body));
+    } catch (parseError) {
+      console.error('Summarize API - Error parsing request body:', parseError);
+      return NextResponse.json(
+        { 
+          error: "Invalid request format",
+          message: "The request body could not be parsed as JSON"
+        },
+        { status: 400 }
+      );
+    }
     
     // Handle null values by replacing them with undefined
     Object.keys(body).forEach(key => {
@@ -67,7 +91,21 @@ export async function POST(request: Request) {
       }
     });
     
-    const data = summarizeRequestSchema.parse(body);
+    // Validate the request data
+    let data;
+    try {
+      data = summarizeRequestSchema.parse(body);
+    } catch (validationError) {
+      console.error('Summarize API - Validation error:', validationError);
+      return NextResponse.json(
+        { 
+          error: "Invalid request data",
+          message: "The request data did not match the expected schema",
+          details: validationError
+        },
+        { status: 400 }
+      );
+    }
     
     // Modify format to include search results section if search query is provided
     let format = data.format;
@@ -448,29 +486,68 @@ export async function POST(request: Request) {
         prompt += `\n\n${modelInfo}`;
       }
       
-      // Use the configured model from environment variables
-      result = await generateObject({
-        model: openai(env.OPENAI_REPORT_MODEL, { 
-          structuredOutputs: true,
-          maxTokens: 4000 // Limit response size
-        }),
-        schemaName: "communicationReport",
-        schemaDescription: "A formatted report of email communications",
-        schema: z.object({ 
-          report: z.string(),
-          highlights: z.array(z.string())
-        }),
-        prompt,
-      });
-      
-      console.log('Summarize API - AI result received');
-      
-      if (!result || !result.object) {
-        throw new Error('No result returned from AI');
+      // Use the configured model from environment variables with timeout handling
+      try {
+        // Set a reasonable timeout for the OpenAI API call
+        const timeoutMs = 50000; // 50 seconds (Vercel functions have a 60s limit)
+        
+        // Create a promise that resolves with the AI result
+        const aiPromise = generateObject({
+          model: openai(env.OPENAI_REPORT_MODEL, { 
+            structuredOutputs: true,
+            maxTokens: 4000 // Limit response size
+          }),
+          schemaName: "communicationReport",
+          schemaDescription: "A formatted report of email communications",
+          schema: z.object({ 
+            report: z.string(),
+            highlights: z.array(z.string())
+          }),
+          prompt,
+        });
+        
+        // Create a timeout promise
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => {
+            reject(new Error(`OpenAI API call timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+        });
+        
+        // Race the AI promise against the timeout
+        result = await Promise.race([aiPromise, timeoutPromise]);
+        
+        console.log('Summarize API - AI result received');
+        
+        if (!result || !result.object) {
+          throw new Error('No result returned from AI');
+        }
+        
+        console.log('Summarize API - Report length:', result.object.report.length);
+        console.log('Summarize API - Highlights count:', result.object.highlights.length);
+      } catch (err) {
+        console.error('Summarize API - AI generation error:', err);
+        
+        // Check for specific OpenAI API errors
+        const errorMessage = err.message || String(err);
+        
+        if (errorMessage.includes('401') || errorMessage.includes('Authentication')) {
+          return NextResponse.json({
+            error: "OpenAI API authentication error",
+            message: "The OpenAI API key is invalid or has expired. Please check your API key configuration."
+          }, { status: 401 });
+        }
+        
+        if (errorMessage.includes('timeout')) {
+          return NextResponse.json({
+            error: "OpenAI API timeout",
+            message: "The request to OpenAI took too long to complete. Please try again with a smaller date range or fewer emails."
+          }, { status: 504 });
+        }
+        
+        return NextResponse.json({
+          error: "AI generation error: " + errorMessage
+        }, { status: 500 });
       }
-      
-      console.log('Summarize API - Report length:', result.object.report.length);
-      console.log('Summarize API - Highlights count:', result.object.highlights.length);
     } catch (err) {
       console.error('Summarize API - AI generation error:', err);
       return NextResponse.json({
@@ -517,8 +594,16 @@ export async function POST(request: Request) {
     if (error instanceof Error && error.stack) {
       console.error("Stack trace:", error.stack);
     }
+    
+    // Provide a more detailed error response
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    
     return NextResponse.json(
-      { error: "Failed to generate summary: " + (error instanceof Error ? error.message : String(error)) },
+      { 
+        error: "Failed to generate summary", 
+        message: errorMessage,
+        timestamp: new Date().toISOString()
+      },
       { status: 500 }
     );
   }
