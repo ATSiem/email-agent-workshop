@@ -70,10 +70,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Function to add user email to request headers
   const addUserEmailToHeaders = (email: string | undefined) => {
-    if (typeof window !== 'undefined' && email) {
-      console.log('Storing user email in session storage:', email);
-      // Store the email in sessionStorage for use in API requests
-      sessionStorage.setItem('userEmail', email);
+    if (typeof window !== 'undefined') {
+      if (email) {
+        console.log('Storing user email in session storage:', email);
+        // Store the email in sessionStorage for use in API requests
+        sessionStorage.setItem('userEmail', email);
+      } else {
+        console.warn('Attempted to store undefined or empty email in session storage');
+      }
+      
+      // Log current session storage state for debugging
+      const storedEmail = sessionStorage.getItem('userEmail');
+      console.log('Current email in session storage after update:', storedEmail);
     }
   };
 

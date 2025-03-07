@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { getUserAccessToken } from '~/lib/auth/microsoft';
+import { getUserEmail } from '~/lib/auth/microsoft';
 import Link from 'next/link';
 
 interface ClientFormProps {
@@ -78,15 +79,39 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
       console.log('Request data:', JSON.stringify(requestData));
       
       try {
-        // Get user email from session storage for debugging
-        const userEmail = typeof window !== 'undefined' ? sessionStorage.getItem('userEmail') : null;
+        // Get user email from session storage
+        let userEmail = typeof window !== 'undefined' ? sessionStorage.getItem('userEmail') : null;
+        
+        // If not in session storage, try to get it from Graph API
+        if (!userEmail) {
+          console.log('User email not found in session storage, trying to get from Graph API');
+          try {
+            userEmail = await getUserEmail();
+            console.log('User email from Graph API:', userEmail);
+            
+            // Store it in session storage for future use
+            if (userEmail && typeof window !== 'undefined') {
+              sessionStorage.setItem('userEmail', userEmail);
+              console.log('Stored user email in session storage');
+            }
+          } catch (emailError) {
+            console.error('Failed to get user email from Graph API:', emailError);
+          }
+        }
+        
+        // Log the user email for debugging
+        console.log('User email for request:', userEmail);
+        
+        if (!userEmail) {
+          console.warn('User email is missing from both session storage and Graph API');
+        }
         
         const response = await fetch('/api/clients', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`,
-            ...(userEmail ? { 'X-User-Email': userEmail } : {})
+            'X-User-Email': userEmail || '' // Always include the header even if empty
           },
           body: JSON.stringify(requestData),
         });

@@ -85,10 +85,13 @@ export function middleware(request: NextRequest) {
         return NextResponse.json(
           {
             error: "Access denied",
-            message: "User email information is missing"
+            message: "User email information is missing",
+            debug_info: `Status: 403\nError: Access denied\nMessage: User email information is missing`
           },
           { status: 403 }
         );
+      } else {
+        console.log('Development mode: allowing request without email header');
       }
     }
   }
