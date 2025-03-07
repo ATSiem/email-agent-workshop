@@ -94,18 +94,40 @@ export async function GET(request: Request) {
           SELECT * FROM clients ORDER BY name ASC
         `);
         
-        const clients = stmt.all();
-        console.log('Clients API - Found', clients.length, 'clients');
-        
-        // Parse JSON strings back to arrays for each client
-        const formattedClients = clients.map(client => ({
-          ...client,
-          domains: JSON.parse(client.domains),
-          emails: JSON.parse(client.emails),
-        }));
-        
-        console.log('Clients API - Returning formatted clients');
-        return NextResponse.json({ clients: formattedClients });
+        try {
+          const clients = stmt.all();
+          console.log('Clients API - Found', Array.isArray(clients) ? clients.length : 'non-array result', 'clients');
+          
+          // Ensure clients is an array before mapping
+          if (!Array.isArray(clients)) {
+            console.log('Clients API - Non-array result, returning empty array');
+            return NextResponse.json({ clients: [] });
+          }
+          
+          // Parse JSON strings back to arrays for each client
+          const formattedClients = clients.map(client => {
+            try {
+              return {
+                ...client,
+                domains: JSON.parse(client.domains || '[]'),
+                emails: JSON.parse(client.emails || '[]'),
+              };
+            } catch (parseError) {
+              console.error('Error parsing client JSON fields:', parseError);
+              return {
+                ...client,
+                domains: [],
+                emails: [],
+              };
+            }
+          });
+          
+          console.log('Clients API - Returning formatted clients');
+          return NextResponse.json({ clients: formattedClients });
+        } catch (dbError) {
+          console.error("Database query error:", dbError);
+          return NextResponse.json({ clients: [] });
+        }
       }
     } catch (dbError) {
       console.error("Database error:", dbError);

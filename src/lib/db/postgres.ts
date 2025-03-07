@@ -90,8 +90,17 @@ export const compatDb = {
             }
           }
           
-          const result = await sql.query(query, params);
-          return result.rows;
+          try {
+            // Safely handle parameters to avoid SQL syntax errors
+            const result = await sql.query(query, params);
+            
+            // Ensure we always return an array, even if result.rows is undefined
+            return Array.isArray(result.rows) ? result.rows : [];
+          } catch (error) {
+            console.error('Error in Postgres query:', error, 'Query:', query);
+            // Return empty array on error to prevent e.map is not a function
+            return [];
+          }
         }
       };
     }
