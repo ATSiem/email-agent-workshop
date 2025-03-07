@@ -259,7 +259,7 @@ export async function POST(request: Request) {
         // Use Postgres-compatible syntax
         try {
           console.log('POST /api/clients - Using Postgres insert');
-          await db.insert(clients).values({
+          await db.insert('clients', {
             id: clientId,
             name: data.name,
             domains: JSON.stringify(data.domains),
