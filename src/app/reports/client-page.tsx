@@ -11,6 +11,9 @@ import Link from 'next/link';
 import { ThemeToggle } from '~/components/theme-provider';
 import { getUserAccessToken } from '~/lib/auth/microsoft';
 
+// Use the environment variable set at build time
+const VERSION_TOKEN = process.env.VERSION_TOKEN || 'dev-build-local';
+
 export function ClientPage() {
   const [activeView, setActiveView] = useState('clients'); // 'clients', 'templates', 'generate'
   const [selectedClientId, setSelectedClientId] = useState(null);
@@ -96,6 +99,7 @@ export function ClientPage() {
           <h1 className="text-2xl font-bold">
             <span className="mr-2" role="img" aria-label="document">📊</span>
             Client Reports
+            <div className="text-[8px] opacity-30 font-normal pl-1">{VERSION_TOKEN}</div>
           </h1>
         </div>
         <div className="flex items-center gap-4">
