@@ -166,11 +166,22 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
         setDomains('');
         setEmails('');
         
-        // Notify parent component with a small delay to ensure the API has time to process
+        // Notify parent component immediately and with longer delays to ensure the API has time to process
+        // This helps ensure the client list gets refreshed even if there are caching issues
+        console.log('Calling onClientAdded callback immediately');
+        onClientAdded();
+        
+        // Call again after a short delay
         setTimeout(() => {
-          console.log('Calling onClientAdded callback');
+          console.log('Calling onClientAdded callback after short delay');
           onClientAdded();
-        }, 500);
+        }, 1000);
+        
+        // Call one more time after a longer delay
+        setTimeout(() => {
+          console.log('Calling onClientAdded callback after longer delay');
+          onClientAdded();
+        }, 3000);
         
       } catch (fetchError) {
         console.error('Fetch error:', fetchError);

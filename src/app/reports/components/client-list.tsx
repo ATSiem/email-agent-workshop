@@ -24,12 +24,13 @@ export const ClientList = forwardRef<{ refreshClients: () => Promise<void> }, Cl
     const [lastRefreshTime, setLastRefreshTime] = useState<number>(0);
     
     // Function to fetch clients
-    const fetchClients = useCallback(async () => {
+    const fetchClients = useCallback(async (forceRefresh = false) => {
       // Set a minimum time between refreshes to prevent excessive API calls
       const now = Date.now();
       const minRefreshInterval = 1000; // 1 second
       
-      if (now - lastRefreshTime < minRefreshInterval && clients.length > 0) {
+      // Only skip if not forced and we already have clients
+      if (!forceRefresh && now - lastRefreshTime < minRefreshInterval && clients.length > 0) {
         console.log('ClientList - Skipping refresh, too soon since last refresh');
         return;
       }
@@ -59,11 +60,17 @@ export const ClientList = forwardRef<{ refreshClients: () => Promise<void> }, Cl
           console.warn('ClientList - No user email found in session storage');
         }
         
+        // Add a cache-busting timestamp
+        const timestamp = Date.now();
+        
         // Fetch clients from API
         console.log('ClientList - Sending API request to /api/clients');
-        const response = await fetch('/api/clients', {
+        const response = await fetch(`/api/clients?_=${timestamp}`, {
+          method: 'GET', // Explicitly specify method
           headers: {
             'Authorization': `Bearer ${token}`,
+            'Pragma': 'no-cache',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
             ...(userEmail ? { 'X-User-Email': userEmail } : {})
           },
           // Add cache busting parameter to prevent caching
@@ -146,9 +153,10 @@ export const ClientList = forwardRef<{ refreshClients: () => Promise<void> }, Cl
       }
     }, [clients.length, lastRefreshTime]);
     
-    // Expose refreshClients method to parent components
+    // Expose refreshClients method to parent components with force refresh option
     useImperativeHandle(ref, () => ({
-      refreshClients: fetchClients
+      // Always force a refresh when called from parent
+      refreshClients: () => fetchClients(true)
     }), [fetchClients]);
     
     // Load cached clients on mount before fetching from API

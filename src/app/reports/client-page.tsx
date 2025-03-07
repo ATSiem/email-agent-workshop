@@ -37,36 +37,25 @@ export function ClientPage() {
     };
   }, []);
 
-  // Function to refresh the client list
-  const refreshClientList = useCallback(() => {
-    if (clientListRef.current && clientListRef.current.refreshClients) {
-      console.log('Refreshing client list');
-      clientListRef.current.refreshClients();
-    } else {
-      console.log('Client list ref not available for refresh');
-    }
-  }, []);
-
-  // Fetch clients when authenticated
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchClients();
-    }
-  }, [isAuthenticated]);
-
   // Fetch clients and select the first one if none is selected
-  const fetchClients = async () => {
+  const fetchClients = useCallback(async () => {
     try {
       const token = getUserAccessToken();
       
-      const response = await fetch('/api/clients', {
+      // Add a timestamp parameter to prevent caching
+      const timestamp = new Date().getTime();
+      
+      const response = await fetch(`/api/clients?_=${timestamp}`, {
         headers: token ? {
           'Authorization': `Bearer ${token}`
-        } : {}
+        } : {},
+        // Use cache: 'no-store' to prevent caching
+        cache: 'no-store'
       });
       
       if (response.ok) {
         const data = await response.json();
+        console.log('Fetched clients:', data.clients);
         setClients(data.clients || []);
         
         // If we're switching to generate view and no client is selected, select the first one
@@ -77,7 +66,26 @@ export function ClientPage() {
     } catch (error) {
       console.error('Error fetching clients:', error);
     }
-  };
+  }, [activeView, selectedClientId]);
+
+  // Function to refresh the client list
+  const refreshClientList = useCallback(() => {
+    if (clientListRef.current && clientListRef.current.refreshClients) {
+      console.log('Refreshing client list');
+      clientListRef.current.refreshClients();
+    } else {
+      console.log('Client list ref not available for refresh');
+      // If ref isn't available, directly fetch clients as a fallback
+      fetchClients();
+    }
+  }, [fetchClients]);
+
+  // Fetch clients when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchClients();
+    }
+  }, [isAuthenticated, fetchClients]);
 
   // When switching to generate view, fetch clients and select one if needed
   // When switching to clients view, refresh the client list
@@ -90,7 +98,7 @@ export function ClientPage() {
     if (activeView === 'clients' && isAuthenticated) {
       refreshClientList();
     }
-  }, [activeView, isAuthenticated, selectedClientId, refreshClientList]);
+  }, [activeView, isAuthenticated, selectedClientId, refreshClientList, fetchClients]);
 
   return (
     <div className="mx-auto mt-10 max-w-screen-lg">
@@ -185,7 +193,11 @@ export function ClientPage() {
                   <ClientForm 
                     onClientAdded={() => {
                       // Refresh the list when a client is added
+                      console.log('Client added, refreshing list and fetching clients directly');
                       refreshClientList();
+                      
+                      // Also directly fetch clients to update the local state
+                      fetchClients();
                     }} 
                   />
                 </div>
