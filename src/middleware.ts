@@ -31,12 +31,31 @@ export function middleware(request: NextRequest) {
     const authHeader = request.headers.get('Authorization');
     let accessToken = authHeader ? authHeader.replace('Bearer ', '') : null;
     
-    // If no token in the header, try to get from server-side session
+    // If no token in the Authorization header, check X-MS-TOKEN header
+    if (!accessToken) {
+      const msTokenHeader = request.headers.get('X-MS-TOKEN');
+      if (msTokenHeader) {
+        accessToken = msTokenHeader;
+        console.log('Got access token from X-MS-TOKEN header');
+      }
+    } else {
+      console.log('Got access token from Authorization header');
+    }
+    
+    // If still no token, try to get from server-side session
     if (!accessToken) {
       accessToken = getUserAccessToken();
       console.log('Got access token from server-side session:', !!accessToken);
-    } else {
-      console.log('Got access token from Authorization header');
+    }
+    
+    // Check cookies as a last resort
+    if (!accessToken) {
+      const cookies = request.cookies;
+      const msGraphToken = cookies.get('msGraphToken');
+      if (msGraphToken) {
+        accessToken = msGraphToken.value;
+        console.log('Got access token from cookies');
+      }
     }
     
     // If no token found, user is not authenticated
@@ -63,15 +82,22 @@ export function middleware(request: NextRequest) {
       // Skip domain validation in development mode if configured
       if (isDevelopment && !env.ALLOWED_EMAIL_DOMAIN) {
         console.log('Development mode: skipping domain validation');
-      } else if (emailDomain !== env.ALLOWED_EMAIL_DOMAIN) {
-        console.log('Domain not allowed, returning 403');
-        return NextResponse.json(
-          {
-            error: "Access denied",
-            message: `This application is restricted to users with ${env.ALLOWED_EMAIL_DOMAIN} email addresses`
-          },
-          { status: 403 }
-        );
+      } else {
+        // Check if the email domain is in the allowed list
+        // ALLOWED_EMAIL_DOMAIN can be a comma-separated list of domains
+        const allowedDomains = env.ALLOWED_EMAIL_DOMAIN?.split(',').map(d => d.trim().toLowerCase()) || [];
+        console.log('Allowed domains:', allowedDomains);
+        
+        if (!allowedDomains.includes(emailDomain)) {
+          console.log('Domain not allowed, returning 403');
+          return NextResponse.json(
+            {
+              error: "Access denied",
+              message: `This application is restricted to users with ${allowedDomains.join(' or ')} email addresses`
+            },
+            { status: 403 }
+          );
+        }
       }
     } else {
       console.log('No user email in request headers');
