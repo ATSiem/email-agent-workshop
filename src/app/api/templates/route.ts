@@ -39,38 +39,38 @@ export async function GET(request: Request) {
     const templateId = url.searchParams.get('id');
     const clientId = url.searchParams.get('clientId');
     
-    if (templateId) {
-      // Fetch a single template
-      const stmt = db.connection.prepare(`
-        SELECT t.*, c.name as client_name
-        FROM report_templates t
-        LEFT JOIN clients c ON t.client_id = c.id
-        WHERE t.id = ?
-      `);
-      
-      const template = stmt.get(templateId);
-      
-      if (!template) {
-        return NextResponse.json({ error: "Template not found" }, { status: 404 });
-      }
-      
-      return NextResponse.json(template);
-    } else if (clientId) {
-      // Fetch templates for a specific client
-      const stmt = db.connection.prepare(`
-        SELECT t.*, c.name as client_name
-        FROM report_templates t
-        LEFT JOIN clients c ON t.client_id = c.id
-        WHERE t.client_id = ?
-        ORDER BY t.name ASC
-      `);
-      
-      const templates = stmt.all(clientId);
-      
-      return NextResponse.json({ templates: templates || [] });
-    } else {
-      // Fetch all templates
-      try {
+    let templates = [];
+    
+    try {
+      if (templateId) {
+        // Fetch a single template
+        const stmt = db.connection.prepare(`
+          SELECT t.*, c.name as client_name
+          FROM report_templates t
+          LEFT JOIN clients c ON t.client_id = c.id
+          WHERE t.id = ?
+        `);
+        
+        const template = stmt.get(templateId);
+        
+        if (!template) {
+          return NextResponse.json({ error: "Template not found" }, { status: 404 });
+        }
+        
+        templates = [template];
+      } else if (clientId) {
+        // Fetch templates for a specific client
+        const stmt = db.connection.prepare(`
+          SELECT t.*, c.name as client_name
+          FROM report_templates t
+          LEFT JOIN clients c ON t.client_id = c.id
+          WHERE t.client_id = ?
+          ORDER BY t.name ASC
+        `);
+        
+        templates = stmt.all(clientId) || [];
+      } else {
+        // Fetch all templates
         const stmt = db.connection.prepare(`
           SELECT t.*, c.name as client_name
           FROM report_templates t
@@ -78,14 +78,29 @@ export async function GET(request: Request) {
           ORDER BY t.name ASC
         `);
         
-        const templates = stmt.all();
-        
-        return NextResponse.json({ templates: templates || [] });
-      } catch (dbError) {
-        console.error("Database error fetching templates:", dbError);
-        // Even if there's a database error, return an empty array instead of an error
-        return NextResponse.json({ templates: [] });
+        templates = stmt.all() || [];
       }
+      
+      // Log the templates for debugging
+      console.log(`Retrieved ${templates.length} templates`);
+      
+      // Ensure we have the expected fields in each template
+      templates = templates.map(template => ({
+        id: template.id,
+        name: template.name,
+        format: template.format,
+        client_id: template.client_id,
+        client_name: template.client_name,
+        example_prompt: template.example_prompt,
+        created_at: template.created_at,
+        updated_at: template.updated_at
+      }));
+      
+      return NextResponse.json({ templates });
+    } catch (dbError) {
+      console.error("Database error fetching templates:", dbError);
+      // Even if there's a database error, return an empty array instead of an error
+      return NextResponse.json({ templates: [] });
     }
   } catch (error) {
     console.error("Error fetching templates:", error);

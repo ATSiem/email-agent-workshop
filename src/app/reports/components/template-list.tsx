@@ -47,14 +47,37 @@ export function TemplateList({ onSelectTemplate }: TemplateListProps) {
       
       const data = await response.json();
       
-      // Check if data.templates exists and is an array
-      if (!data.templates || !Array.isArray(data.templates)) {
-        console.error('Invalid response format:', data);
+      // Log the full response for debugging
+      console.log('Templates API response:', data);
+      
+      // More robust handling of different response formats
+      let templatesData = [];
+      
+      if (data.templates && Array.isArray(data.templates)) {
+        // Standard format with templates property
+        templatesData = data.templates;
+      } else if (Array.isArray(data)) {
+        // Direct array format
+        templatesData = data;
+      } else {
+        console.error('Unexpected response format:', data);
         throw new Error('Invalid response format from server');
       }
       
+      // Validate that we have the expected fields in each template
+      if (templatesData.length > 0) {
+        const requiredFields = ['id', 'name', 'format'];
+        const firstTemplate = templatesData[0];
+        
+        const missingFields = requiredFields.filter(field => !(field in firstTemplate));
+        if (missingFields.length > 0) {
+          console.error(`Templates missing required fields: ${missingFields.join(', ')}`, firstTemplate);
+          throw new Error('Invalid template data: missing required fields');
+        }
+      }
+      
       // Initialize all templates with expanded=false
-      const templatesWithState = data.templates.map((template: Template) => ({
+      const templatesWithState = templatesData.map((template: Template) => ({
         ...template,
         expanded: false
       }));

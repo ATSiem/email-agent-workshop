@@ -13,6 +13,7 @@ import { ThemeToggle } from '~/components/theme-provider';
 export function ClientPage() {
   const [activeView, setActiveView] = useState('clients'); // 'clients', 'templates', 'generate'
   const [selectedClientId, setSelectedClientId] = useState(null);
+  const [clients, setClients] = useState([]);
   
   const { isAuthenticated, isLoading: authLoading, user, logout } = useAuth();
 
@@ -30,6 +31,45 @@ export function ClientPage() {
       window.removeEventListener('navigate-to-generate', handleNavigateToGenerate);
     };
   }, []);
+
+  // Fetch clients when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchClients();
+    }
+  }, [isAuthenticated]);
+
+  // Fetch clients and select the first one if none is selected
+  const fetchClients = async () => {
+    try {
+      const token = sessionStorage.getItem('msGraphToken');
+      
+      const response = await fetch('/api/clients', {
+        headers: token ? {
+          'Authorization': `Bearer ${token}`
+        } : {}
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setClients(data.clients || []);
+        
+        // If we're switching to generate view and no client is selected, select the first one
+        if (activeView === 'generate' && !selectedClientId && data.clients && data.clients.length > 0) {
+          setSelectedClientId(data.clients[0].id);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching clients:', error);
+    }
+  };
+
+  // When switching to generate view, fetch clients and select one if needed
+  useEffect(() => {
+    if (activeView === 'generate' && isAuthenticated && !selectedClientId) {
+      fetchClients();
+    }
+  }, [activeView, isAuthenticated, selectedClientId]);
 
   return (
     <div className="mx-auto mt-10 max-w-screen-lg">
@@ -154,12 +194,29 @@ export function ClientPage() {
             )}
             
             {activeView === 'generate' && (
-              <ReportGenerator 
-                initialClientId={selectedClientId}
-                onReportGenerated={() => {
-                  // Handle report generation success
-                }}
-              />
+              <>
+                {!selectedClientId && clients.length === 0 ? (
+                  <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+                    <h2 className="text-xl font-medium mb-6 dark:text-white">Generate Client Report</h2>
+                    <div className="py-8 text-center text-gray-500 dark:text-gray-400">
+                      <p>No clients found. Please add a client first.</p>
+                      <button
+                        onClick={() => setActiveView('clients')}
+                        className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
+                      >
+                        Go to Clients
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <ReportGenerator 
+                    initialClientId={selectedClientId}
+                    onReportGenerated={() => {
+                      // Handle report generation success
+                    }}
+                  />
+                )}
+              </>
             )}
           </div>
         </>

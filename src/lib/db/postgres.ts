@@ -32,7 +32,18 @@ export const compatDb = {
         return null;
       },
       findMany: async (params?: any) => {
-        let query = pgDb.select().from(schema.reportTemplates);
+        let query = pgDb.select({
+          id: schema.reportTemplates.id,
+          name: schema.reportTemplates.name,
+          format: schema.reportTemplates.format,
+          client_id: schema.reportTemplates.clientId,
+          client_name: schema.clients.name,
+          example_prompt: schema.reportTemplates.examplePrompt,
+          created_at: schema.reportTemplates.createdAt,
+          updated_at: schema.reportTemplates.updatedAt
+        })
+        .from(schema.reportTemplates)
+        .leftJoin(schema.clients, eq(schema.reportTemplates.clientId, schema.clients.id));
         
         // Handle clientId filter if present
         if (params && params.where && params.where.clientId) {
@@ -58,6 +69,27 @@ export const compatDb = {
           return result.rows[0];
         },
         all: async (...params: any[]) => {
+          // Check if this is a templates query
+          if (query.includes('FROM report_templates t') && query.includes('LEFT JOIN clients c')) {
+            try {
+              // For template queries, ensure we return with the expected field names
+              const result = await sql.query(query, params);
+              return result.rows.map((row: any) => ({
+                id: row.id,
+                name: row.name,
+                format: row.format,
+                client_id: row.client_id,
+                client_name: row.client_name,
+                example_prompt: row.example_prompt,
+                created_at: row.created_at,
+                updated_at: row.updated_at
+              }));
+            } catch (error) {
+              console.error('Error in Postgres template query:', error);
+              return [];
+            }
+          }
+          
           const result = await sql.query(query, params);
           return result.rows;
         }
