@@ -17,12 +17,14 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
   const [error, setError] = useState('');
   const [debugInfo, setDebugInfo] = useState<string | null>(null);
   const [authError, setAuthError] = useState(false);
+  const [success, setSuccess] = useState(false);
   
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
     setDebugInfo(null);
     setAuthError(false);
+    setSuccess(false);
     
     try {
       setIsSubmitting(true);
@@ -114,6 +116,8 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
             'X-User-Email': userEmail || '' // Always include the header even if empty
           },
           body: JSON.stringify(requestData),
+          // Prevent caching
+          cache: 'no-store'
         });
         
         console.log('API response status:', response.status);
@@ -154,13 +158,20 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
         
         console.log('Client created successfully:', responseData);
         
+        // Show success message
+        setSuccess(true);
+        
         // Reset form
         setName('');
         setDomains('');
         setEmails('');
         
-        // Notify parent component
-        onClientAdded();
+        // Notify parent component with a small delay to ensure the API has time to process
+        setTimeout(() => {
+          console.log('Calling onClientAdded callback');
+          onClientAdded();
+        }, 500);
+        
       } catch (fetchError) {
         console.error('Fetch error:', fetchError);
         throw new Error(`Network error: ${fetchError.message}`);
@@ -188,6 +199,12 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
       {error && !authError && (
         <div className="mb-4 p-3 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 rounded-md text-sm">
           {error}
+        </div>
+      )}
+      
+      {success && (
+        <div className="mb-4 p-3 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 rounded-md text-sm">
+          Client added successfully!
         </div>
       )}
       

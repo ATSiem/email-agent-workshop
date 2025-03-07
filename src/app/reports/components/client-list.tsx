@@ -12,22 +12,32 @@ interface Client {
 }
 
 interface ClientListProps {
-  id?: string;
   onSelectClient: (clientId: string) => void;
 }
 
 export const ClientList = forwardRef<{ refreshClients: () => Promise<void> }, ClientListProps>(
-  function ClientList({ id, onSelectClient }, ref) {
+  function ClientList({ onSelectClient }, ref) {
     const [clients, setClients] = useState<Client[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [authError, setAuthError] = useState(false);
+    const [lastRefreshTime, setLastRefreshTime] = useState<number>(0);
     
     // Function to fetch clients
     const fetchClients = useCallback(async () => {
+      // Set a minimum time between refreshes to prevent excessive API calls
+      const now = Date.now();
+      const minRefreshInterval = 1000; // 1 second
+      
+      if (now - lastRefreshTime < minRefreshInterval && clients.length > 0) {
+        console.log('ClientList - Skipping refresh, too soon since last refresh');
+        return;
+      }
+      
       setLoading(true);
       setError(null);
       setAuthError(false);
+      setLastRefreshTime(now);
       
       try {
         console.log('ClientList - Fetching clients');
@@ -52,7 +62,9 @@ export const ClientList = forwardRef<{ refreshClients: () => Promise<void> }, Cl
           headers: {
             'Authorization': `Bearer ${token}`,
             ...(userEmail ? { 'X-User-Email': userEmail } : {})
-          }
+          },
+          // Add cache busting parameter to prevent caching
+          cache: 'no-store'
         });
         
         console.log('ClientList - Response status:', response.status);
@@ -104,12 +116,12 @@ export const ClientList = forwardRef<{ refreshClients: () => Promise<void> }, Cl
       } finally {
         setLoading(false);
       }
-    }, []);
+    }, [clients.length, lastRefreshTime]);
     
     // Expose refreshClients method to parent components
     useImperativeHandle(ref, () => ({
       refreshClients: fetchClients
-    }));
+    }), [fetchClients]);
     
     // Load cached clients on mount before fetching from API
     useEffect(() => {
@@ -170,16 +182,9 @@ export const ClientList = forwardRef<{ refreshClients: () => Promise<void> }, Cl
     };
     
     return (
-      <div id={id} className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-medium dark:text-white">Your Clients</h2>
-          <button
-            onClick={fetchClients}
-            className="text-sm text-blue-600 hover:text-blue-500 dark:text-blue-400"
-            disabled={loading}
-          >
-            {loading ? 'Refreshing...' : 'Refresh'}
-          </button>
         </div>
         
         {authError && (

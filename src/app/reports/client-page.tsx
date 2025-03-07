@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '~/components/auth-provider';
 import { LoginButton } from '~/components/login-button';
 import { ClientForm } from './components/client-form';
@@ -15,6 +15,7 @@ export function ClientPage() {
   const [activeView, setActiveView] = useState('clients'); // 'clients', 'templates', 'generate'
   const [selectedClientId, setSelectedClientId] = useState(null);
   const [clients, setClients] = useState([]);
+  const clientListRef = useRef(null);
   
   const { isAuthenticated, isLoading: authLoading, user, logout } = useAuth();
 
@@ -31,6 +32,16 @@ export function ClientPage() {
     return () => {
       window.removeEventListener('navigate-to-generate', handleNavigateToGenerate);
     };
+  }, []);
+
+  // Function to refresh the client list
+  const refreshClientList = useCallback(() => {
+    if (clientListRef.current && clientListRef.current.refreshClients) {
+      console.log('Refreshing client list');
+      clientListRef.current.refreshClients();
+    } else {
+      console.log('Client list ref not available for refresh');
+    }
   }, []);
 
   // Fetch clients when authenticated
@@ -66,11 +77,17 @@ export function ClientPage() {
   };
 
   // When switching to generate view, fetch clients and select one if needed
+  // When switching to clients view, refresh the client list
   useEffect(() => {
     if (activeView === 'generate' && isAuthenticated && !selectedClientId) {
       fetchClients();
     }
-  }, [activeView, isAuthenticated, selectedClientId]);
+    
+    // Refresh client list when switching to clients view
+    if (activeView === 'clients' && isAuthenticated) {
+      refreshClientList();
+    }
+  }, [activeView, isAuthenticated, selectedClientId, refreshClientList]);
 
   return (
     <div className="mx-auto mt-10 max-w-screen-lg">
@@ -164,16 +181,13 @@ export function ClientPage() {
                   <ClientForm 
                     onClientAdded={() => {
                       // Refresh the list when a client is added
-                      const clientListEl = document.getElementById('client-list');
-                      if (clientListEl && typeof (clientListEl as any).refreshClients === 'function') {
-                        (clientListEl as any).refreshClients();
-                      }
+                      refreshClientList();
                     }} 
                   />
                 </div>
                 <div className="md:col-span-2">
                   <ClientList 
-                    id="client-list"
+                    ref={clientListRef}
                     onSelectClient={(clientId) => {
                       setSelectedClientId(clientId);
                       setActiveView('generate');
