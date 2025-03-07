@@ -14,6 +14,11 @@ const PROTECTED_API_PATHS = [
   '/api/admin',
 ];
 
+// Define paths that should bypass email validation
+const BYPASS_EMAIL_VALIDATION = [
+  '/api/system/init-db',
+];
+
 // Check if we're in development mode
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
@@ -51,47 +56,54 @@ export function middleware(request: NextRequest) {
       );
     }
 
-    // Get user email from the request headers (set by auth-provider)
-    const userEmail = request.headers.get('X-User-Email');
-    console.log('User email from request headers:', userEmail);
+    // Check if this path should bypass email validation
+    const shouldBypassEmailValidation = BYPASS_EMAIL_VALIDATION.some(bypassPath => path === bypassPath);
     
-    // Check if the user's email domain is allowed
-    if (userEmail) {
-      const emailDomain = userEmail.split('@')[1]?.toLowerCase();
-      
-      // Get allowed domains from environment variable
-      const allowedDomains = env.ALLOWED_EMAIL_DOMAINS || [];
-      
-      console.log('Email domain:', emailDomain, 'Allowed domains:', allowedDomains);
-      
-      // Skip domain validation in development mode if no domains are configured
-      if (isDevelopment && allowedDomains.length === 0) {
-        console.log('Development mode: skipping domain validation');
-      } else if (allowedDomains.length > 0 && !allowedDomains.includes(emailDomain)) {
-        console.log('Domain not allowed, returning 403');
-        return NextResponse.json(
-          {
-            error: "Access denied",
-            message: `This application is restricted to users with ${allowedDomains.join(' or ')} email addresses`
-          },
-          { status: 403 }
-        );
-      }
+    if (shouldBypassEmailValidation) {
+      console.log('Bypassing email validation for path:', path);
     } else {
-      console.log('No user email in request headers');
-      // In development, we might want to allow requests without email headers
-      if (!isDevelopment) {
-        console.log('Production mode: rejecting request without email header');
-        return NextResponse.json(
-          {
-            error: "Access denied",
-            message: "User email information is missing",
-            debug_info: `Status: 403\nError: Access denied\nMessage: User email information is missing`
-          },
-          { status: 403 }
-        );
+      // Get user email from the request headers (set by auth-provider)
+      const userEmail = request.headers.get('X-User-Email');
+      console.log('User email from request headers:', userEmail);
+      
+      // Check if the user's email domain is allowed
+      if (userEmail) {
+        const emailDomain = userEmail.split('@')[1]?.toLowerCase();
+        
+        // Get allowed domains from environment variable
+        const allowedDomains = env.ALLOWED_EMAIL_DOMAINS || [];
+        
+        console.log('Email domain:', emailDomain, 'Allowed domains:', allowedDomains);
+        
+        // Skip domain validation in development mode if no domains are configured
+        if (isDevelopment && allowedDomains.length === 0) {
+          console.log('Development mode: skipping domain validation');
+        } else if (allowedDomains.length > 0 && !allowedDomains.includes(emailDomain)) {
+          console.log('Domain not allowed, returning 403');
+          return NextResponse.json(
+            {
+              error: "Access denied",
+              message: `This application is restricted to users with ${allowedDomains.join(' or ')} email addresses`
+            },
+            { status: 403 }
+          );
+        }
       } else {
-        console.log('Development mode: allowing request without email header');
+        console.log('No user email in request headers');
+        // In development, we might want to allow requests without email headers
+        if (!isDevelopment) {
+          console.log('Production mode: rejecting request without email header');
+          return NextResponse.json(
+            {
+              error: "Access denied",
+              message: "User email information is missing",
+              debug_info: `Status: 403\nError: Access denied\nMessage: User email information is missing`
+            },
+            { status: 403 }
+          );
+        } else {
+          console.log('Development mode: allowing request without email header');
+        }
       }
     }
   }

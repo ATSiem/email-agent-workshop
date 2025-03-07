@@ -1,12 +1,7 @@
+// Simple script to initialize Postgres database directly
 import { sql } from '@vercel/postgres';
-import { pgDb } from './postgres';
-import * as schema from './pg-schema';
 
-/**
- * Initialize the Postgres database schema
- * This function creates all necessary tables if they don't exist
- */
-export async function initializePostgresSchema() {
+async function main() {
   console.log('Initializing Postgres database schema...');
   
   try {
@@ -21,6 +16,7 @@ export async function initializePostgresSchema() {
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
       );
     `;
+    console.log('Created clients table');
     
     // Create report_templates table
     await sql`
@@ -34,6 +30,7 @@ export async function initializePostgresSchema() {
         example_prompt TEXT
       );
     `;
+    console.log('Created report_templates table');
     
     // Create messages table
     await sql`
@@ -53,6 +50,7 @@ export async function initializePostgresSchema() {
         bcc TEXT DEFAULT ''
       );
     `;
+    console.log('Created messages table');
     
     // Create report_feedback table
     await sql`
@@ -75,24 +73,13 @@ export async function initializePostgresSchema() {
         ip_address TEXT
       );
     `;
+    console.log('Created report_feedback table');
     
     console.log('Postgres database schema initialized successfully');
-    return true;
   } catch (error) {
     console.error('Error initializing Postgres database schema:', error);
-    return false;
+    process.exit(1);
   }
 }
 
-// Run the initialization if this file is executed directly
-if (require.main === module) {
-  initializePostgresSchema()
-    .then(success => {
-      console.log('Database initialization completed with status:', success ? 'SUCCESS' : 'FAILED');
-      process.exit(success ? 0 : 1);
-    })
-    .catch(err => {
-      console.error('Unhandled error during database initialization:', err);
-      process.exit(1);
-    });
-} 
+main(); 
