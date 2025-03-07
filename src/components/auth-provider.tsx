@@ -77,33 +77,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Initialize authentication
   useEffect(() => {
-    // Special case to handle redirects for both production and local development
+    // Handle redirects from Microsoft login
     if (typeof window !== 'undefined' && window.location.hash && window.location.hash.includes('code=')) {
+      console.log('Auth code detected in URL hash:', window.location.hash);
+      
+      // For client-reports.onrender.com - redirect all root URLs with code to the callback
       const hostname = window.location.hostname;
       
-      // For client-reports.onrender.com
-      if (hostname === 'client-reports.onrender.com' && window.location.pathname === '/') {
-        console.log('Detected production site redirect with auth code, redirecting to callback URL');
-        
-        // Save the hash to sessionStorage
-        sessionStorage.setItem('msalAuthHash', window.location.hash);
-        
-        // Redirect to the correct callback URL
-        window.location.href = 'https://client-reports.onrender.com/api/auth/callback';
-        return;
+      if (hostname === 'client-reports.onrender.com') {
+        if (window.location.pathname === '/') {
+          console.log('Production site: auth code in root path, redirecting to callback URL');
+          
+          // Store the hash for later use
+          sessionStorage.setItem('msalAuthHash', window.location.hash);
+          
+          // Redirect to the callback URL
+          window.location.href = 'https://client-reports.onrender.com/api/auth/callback';
+          return;
+        }
       }
       
-      // For localhost:10000
-      if (hostname === 'localhost' && window.location.port === '10000') {
-        console.log('Detected localhost:10000 redirect with auth code, redirecting to correct URL');
-        
-        // Save the hash to sessionStorage
-        sessionStorage.setItem('msalAuthHash', window.location.hash);
-        
-        // Redirect to the correct URL
-        window.location.href = 'http://localhost:3000/';
-        return;
+      // For localhost - handle both port 3000 and any other port
+      if (hostname === 'localhost') {
+        // If on non-standard port with auth code, redirect to port 3000
+        if (window.location.port !== '3000') {
+          console.log('Development: auth code on non-standard port, redirecting to port 3000');
+          
+          // Store the hash for later use
+          sessionStorage.setItem('msalAuthHash', window.location.hash);
+          
+          // Redirect to the standard development URL
+          window.location.href = 'http://localhost:3000/';
+          return;
+        }
       }
+      
+      // Log what's happening for debugging
+      console.log('Auth code in URL, continuing normal MSAL flow');
     }
     
     const initialize = async () => {
@@ -112,21 +122,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       // Check if we have a saved hash from a previous redirect
       const savedHash = sessionStorage.getItem('msalAuthHash');
-      const hostname = window.location.hostname;
       
-      // For production on the callback page
-      if (savedHash && hostname === 'client-reports.onrender.com' && 
-          window.location.pathname === '/api/auth/callback') {
-        console.log('Found saved auth hash for production callback, applying it');
+      if (savedHash) {
+        console.log('Found saved auth hash, applying it to current URL');
+        
+        // Always apply the saved hash if present - this ensures the auth code is available
         window.location.hash = savedHash;
-        sessionStorage.removeItem('msalAuthHash'); // Clean up
-      }
-      
-      // For localhost on port 3000
-      if (savedHash && hostname === 'localhost' && window.location.port === '3000') {
-        console.log('Found saved auth hash from localhost:10000 redirect, applying it');
-        window.location.hash = savedHash;
-        sessionStorage.removeItem('msalAuthHash'); // Clean up
+        
+        // Clear the saved hash to prevent reuse
+        sessionStorage.removeItem('msalAuthHash');
+        
+        // Add a small delay to ensure hash is processed
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
       
       try {
@@ -138,18 +145,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         
         console.log('Initializing auth with hash present:', isRedirectCallback);
         
-        // Add a safety check to prevent endless loops
+        // Add a more permissive safety check for auth loops
+        // but still prevent continuous redirect loops
         const lastAuthAttempt = sessionStorage.getItem('lastAuthAttempt');
+        const authAttemptCount = parseInt(sessionStorage.getItem('authAttemptCount') || '0');
         const now = Date.now();
-        const FIVE_SECONDS = 5000;
+        const ONE_SECOND = 1000;
         
-        if (isRedirectCallback && lastAuthAttempt && (now - parseInt(lastAuthAttempt)) < FIVE_SECONDS) {
-          console.warn('Detected potential auth loop - skipping auth attempt');
-          setIsLoading(false);
-          return;
+        if (isRedirectCallback && lastAuthAttempt) {
+          const timeSinceLastAttempt = now - parseInt(lastAuthAttempt);
+          
+          // If we've had multiple attempts in very quick succession, it may be a loop
+          if (timeSinceLastAttempt < ONE_SECOND && authAttemptCount > 5) {
+            console.warn('Detected potential auth loop - too many attempts in quick succession');
+            console.warn('Resetting auth state to break the loop');
+            
+            // Clear all auth-related storage to break the loop
+            sessionStorage.removeItem('msalAuthHash');
+            sessionStorage.removeItem('lastAuthAttempt');
+            sessionStorage.removeItem('authAttemptCount');
+            
+            // Clean URL
+            if (window.history) {
+              window.history.replaceState({}, document.title, window.location.pathname);
+            }
+            
+            setIsLoading(false);
+            return;
+          }
+          
+          // Update the attempt count
+          sessionStorage.setItem('authAttemptCount', (authAttemptCount + 1).toString());
+        } else {
+          // First attempt or not a redirect callback
+          sessionStorage.setItem('authAttemptCount', '1');
         }
         
-        // Record this attempt to detect loops
+        // Record this attempt
         if (isRedirectCallback) {
           sessionStorage.setItem('lastAuthAttempt', now.toString());
         }
