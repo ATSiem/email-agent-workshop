@@ -198,7 +198,6 @@ if (typeof window === 'undefined') {
         `);
         
         console.log('Fallback database initialized successfully');
-        return;
       } catch (fallbackError) {
         console.error('Failed to create fallback database:', fallbackError);
       }
