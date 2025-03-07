@@ -52,6 +52,8 @@ export function TemplateList({ onSelectTemplate }: TemplateListProps) {
         expanded: false
       }));
       setTemplates(templatesWithState);
+      // Clear any error if we successfully fetched (even if the array is empty)
+      setError('');
     } catch (err) {
       setError(err.message || 'An error occurred');
     } finally {
@@ -124,17 +126,19 @@ export function TemplateList({ onSelectTemplate }: TemplateListProps) {
         <h2 className="text-lg font-medium dark:text-white">Report Templates</h2>
       </div>
       
-      {error && (
+      {error && !isLoading && (
         <div className="p-4 m-4 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 rounded-md text-sm">
           {error}
         </div>
       )}
       
-      {templates.length === 0 ? (
+      {!isLoading && templates.length === 0 && !error && (
         <div className="p-6 text-center text-gray-500 dark:text-gray-400">
           No templates found. Create a template when generating a report.
         </div>
-      ) : (
+      )}
+      
+      {!isLoading && templates.length > 0 && (
         <ul className="divide-y divide-gray-200 dark:divide-gray-700">
           {templates.map((template) => (
             <li key={template.id} className="p-6 hover:bg-gray-50 dark:hover:bg-gray-700">

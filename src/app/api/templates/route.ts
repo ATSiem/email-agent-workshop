@@ -67,7 +67,7 @@ export async function GET(request: Request) {
       
       const templates = stmt.all(clientId);
       
-      return NextResponse.json({ templates });
+      return NextResponse.json({ templates: templates || [] });
     } else {
       // Fetch all templates
       const stmt = db.connection.prepare(`
@@ -79,7 +79,7 @@ export async function GET(request: Request) {
       
       const templates = stmt.all();
       
-      return NextResponse.json({ templates });
+      return NextResponse.json({ templates: templates || [] });
     }
   } catch (error) {
     console.error("Error fetching templates:", error);
