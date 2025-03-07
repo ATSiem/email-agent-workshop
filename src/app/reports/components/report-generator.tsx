@@ -90,6 +90,9 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
     isComplete: boolean;
   } | null>(null);
   
+  // New state to track if we should generate report after email processing
+  const [shouldGenerateAfterProcessing, setShouldGenerateAfterProcessing] = useState(false);
+  
   // Set default date range (current week starting from Monday)
   useEffect(() => {
     const end = new Date();
@@ -250,15 +253,16 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
     return date.toISOString().substring(0, 10);
   }
   
-  // Add a new function to start email processing
-  async function handleProcessEmails() {
+  // Function to start email processing
+  async function handleProcessEmails(generateAfterProcessing = false) {
     if (!selectedClientId || !startDate || !endDate) {
       setError('Please select a client and date range');
-      return;
+      return false;
     }
     
     setError('');
     setIsProcessingEmails(true);
+    setShouldGenerateAfterProcessing(generateAfterProcessing);
     setProcessingStatus({
       progress: 0,
       totalEmails: 0,
@@ -272,7 +276,7 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
       if (!token) {
         setError('Authentication required. Please sign in again.');
         setIsProcessingEmails(false);
-        return;
+        return false;
       }
       
       // Call the process-emails API to start background processing
@@ -301,11 +305,59 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
       // Start polling for status updates
       if (data.taskId) {
         pollProcessingStatus(data.taskId);
+        return true;
       }
+      
+      return false;
     } catch (err) {
       console.error('Error processing emails:', err);
       setError(err.message || 'An error occurred while processing emails');
       setIsProcessingEmails(false);
+      setShouldGenerateAfterProcessing(false);
+      return false;
+    }
+  }
+  
+  // Add a function to refresh clients
+  async function refreshClients() {
+    try {
+      console.log('ReportGenerator - Refreshing clients');
+      
+      const token = getUserAccessToken();
+      
+      if (!token) {
+        console.error('ReportGenerator - Authentication required for refreshing clients');
+        return;
+      }
+      
+      const response = await fetch('/api/clients', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!response.ok) {
+        console.error('ReportGenerator - Error refreshing clients:', response.status);
+        return;
+      }
+      
+      const data = await response.json();
+      console.log('ReportGenerator - Refreshed clients:', data.clients?.length || 0);
+      
+      if (data.clients && Array.isArray(data.clients)) {
+        setClients(data.clients);
+        
+        // Save to localStorage as a backup
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('cachedClients', JSON.stringify(data.clients));
+          } catch (storageError) {
+            console.error('ReportGenerator - Error saving to localStorage:', storageError);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('ReportGenerator - Error refreshing clients:', err);
     }
   }
   
@@ -316,6 +368,7 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
       if (!token) {
         setError('Authentication required. Please sign in again.');
         setIsProcessingEmails(false);
+        setShouldGenerateAfterProcessing(false);
         return;
       }
       
@@ -350,25 +403,46 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
           
           if (data.isFailed) {
             setError(`Email processing failed: ${data.error || 'Unknown error'}`);
+            setShouldGenerateAfterProcessing(false);
+          } else if (data.isComplete) {
+            // Refresh clients when processing is complete
+            await refreshClients();
+            
+            if (shouldGenerateAfterProcessing) {
+              // If processing is complete and we should generate the report, do it now
+              setShouldGenerateAfterProcessing(false);
+              handleGenerateReportInternal();
+            }
           }
         }
       } else {
         setIsProcessingEmails(false);
+        setShouldGenerateAfterProcessing(false);
         setError('Email processing task not found');
       }
     } catch (err) {
       console.error('Error polling status:', err);
       setError(err.message || 'An error occurred while checking processing status');
       setIsProcessingEmails(false);
+      setShouldGenerateAfterProcessing(false);
     }
   }
   
-  // Modify the existing handleGenerateReport function
-  async function handleGenerateReport(e: React.FormEvent) {
-    e.preventDefault();
+  // Internal function to generate report (without the event parameter)
+  async function handleGenerateReportInternal() {
+    // Check all required fields before starting any process
+    if (!selectedClientId) {
+      setError('Please select a client');
+      return;
+    }
     
-    if (!selectedClientId || !selectedTemplateId || !startDate || !endDate) {
-      setError('Please fill in all required fields');
+    if (!selectedTemplateId) {
+      setError('Please select a template');
+      return;
+    }
+    
+    if (!startDate || !endDate) {
+      setError('Please select a date range');
       return;
     }
     
@@ -410,7 +484,7 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
         examplePrompt,
         useVectorSearch,
         searchQuery,
-        skipGraphApi: isProcessingEmails || processingStatus?.isComplete // Skip Graph API if we've processed emails
+        skipGraphApi: processingStatus?.isComplete // Skip Graph API if we've processed emails
       };
       
       console.log('Generating report with params:', requestBody);
@@ -479,26 +553,58 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
         onReportGenerated();
       }
     } catch (err) {
-      console.error('ReportGenerator - Error generating report:', err);
-      
-      // Provide more helpful error messages
-      let errorMessage = err.message || 'An error occurred while generating the report';
-      
-      // Add suggestions for common errors
-      if (errorMessage.includes('Failed to read response from server')) {
-        errorMessage += '\n\nThis could be due to a timeout or server error. Try:\n' +
-                        '1. Selecting a smaller date range\n' +
-                        '2. Using a simpler report template\n' +
-                        '3. Trying again in a few minutes';
-      } else if (errorMessage.includes('OpenAI API')) {
-        errorMessage += '\n\nThere may be an issue with the OpenAI API. Please contact the administrator.';
-      } else if (errorMessage.includes('timed out')) {
-        errorMessage += '\n\nTry selecting a smaller date range or using a simpler report template.';
-      }
-      
-      setError(errorMessage);
+      console.error('Error generating report:', err);
+      setError(err.message || 'An error occurred while generating the report');
     } finally {
       setIsGenerating(false);
+    }
+  }
+  
+  // Modified handleGenerateReport to handle both email processing and report generation
+  async function handleGenerateReport(e: React.FormEvent) {
+    e.preventDefault();
+    
+    // Check all required fields before starting any process
+    if (!selectedClientId) {
+      setError('Please select a client');
+      return;
+    }
+    
+    if (!selectedTemplateId) {
+      setError('Please select a template');
+      return;
+    }
+    
+    if (!startDate || !endDate) {
+      setError('Please select a date range');
+      return;
+    }
+    
+    // Store the current client ID to ensure it's preserved throughout the process
+    const currentClientId = selectedClientId;
+    
+    // Check if we need to process emails first
+    const needsEmailProcessing = !processingStatus?.isComplete;
+    
+    if (needsEmailProcessing) {
+      // Start email processing first, then generate report when done
+      const processingStarted = await handleProcessEmails(true);
+      if (!processingStarted) {
+        setError('Failed to start email processing. Please try again.');
+      }
+      
+      // Ensure client selection is preserved
+      if (currentClientId && currentClientId !== selectedClientId) {
+        setSelectedClientId(currentClientId);
+      }
+    } else {
+      // Emails already processed, generate report directly
+      handleGenerateReportInternal();
+      
+      // Ensure client selection is preserved
+      if (currentClientId && currentClientId !== selectedClientId) {
+        setSelectedClientId(currentClientId);
+      }
     }
   }
   
@@ -600,60 +706,6 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
             </div>
           </div>
           
-          <div className="mt-4">
-            <button
-              type="button"
-              onClick={handleProcessEmails}
-              disabled={isProcessingEmails || !selectedClientId || !startDate || !endDate}
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isProcessingEmails ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Processing Emails...
-                </>
-              ) : processingStatus?.isComplete ? (
-                <>
-                  <svg className="h-4 w-4 mr-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
-                  </svg>
-                  Emails Processed
-                </>
-              ) : (
-                <>
-                  <svg className="h-4 w-4 mr-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                  </svg>
-                  Process Emails
-                </>
-              )}
-            </button>
-            
-            {/* Processing Status */}
-            {isProcessingEmails && processingStatus && (
-              <div className="mt-2">
-                <div className="text-sm text-gray-600 dark:text-gray-400">
-                  Processing {processingStatus.processedEmails} of {processingStatus.totalEmails || '?'} emails ({processingStatus.progress}%)
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2.5 mt-1 dark:bg-gray-700">
-                  <div 
-                    className="bg-blue-600 h-2.5 rounded-full" 
-                    style={{ width: `${processingStatus.progress}%` }}
-                  ></div>
-                </div>
-              </div>
-            )}
-            
-            {processingStatus?.isComplete && (
-              <div className="mt-2 text-sm text-green-600 dark:text-green-400">
-                Successfully processed {processingStatus.processedEmails} emails. You can now generate a report without timeouts.
-              </div>
-            )}
-          </div>
-          
           <div>
             <label htmlFor="format" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Report Format *
@@ -742,7 +794,7 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
             
             <div>
               <label htmlFor="saveName" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Save As Template (Optional)
+                Save as Template (Optional)
               </label>
               <input
                 type="text"
@@ -758,13 +810,43 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
             </div>
           </div>
           
+          {/* Add processing status display */}
+          {(isProcessingEmails || processingStatus?.isComplete) && (
+            <div className="mt-4 mb-4">
+              {/* Processing Status */}
+              {isProcessingEmails && processingStatus && (
+                <div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                    Processing {processingStatus.processedEmails} of {processingStatus.totalEmails || '?'} emails ({processingStatus.progress}%)
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2.5 mt-1 dark:bg-gray-700">
+                    <div 
+                      className="bg-blue-600 h-2.5 rounded-full" 
+                      style={{ width: `${processingStatus.progress}%` }}
+                    ></div>
+                  </div>
+                </div>
+              )}
+              
+              {processingStatus?.isComplete && (
+                <div className="text-sm text-green-600 dark:text-green-400">
+                  Successfully processed {processingStatus.processedEmails} emails. Your report will use these pre-processed emails.
+                </div>
+              )}
+            </div>
+          )}
+          
           <div className="flex justify-end">
             <button
               type="submit"
-              disabled={isGenerating}
+              disabled={isGenerating || isProcessingEmails}
               className="relative px-4 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-indigo-600 rounded-md shadow-sm overflow-hidden group disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <span className="relative z-10">{isGenerating ? 'Processing emails & generating report...' : 'Generate Report'}</span>
+              <span className="relative z-10">
+                {isGenerating ? 'Generating report...' : 
+                 isProcessingEmails ? `Processing emails (${processingStatus?.progress || 0}%)...` : 
+                 processingStatus?.isComplete ? 'Generate Report' : 'Process Emails & Generate Report'}
+              </span>
               <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300 disabled:opacity-0"></div>
               <div className="absolute inset-0 border-0 group-hover:border group-hover:border-white group-hover:border-opacity-30 rounded-md transition-all duration-300"></div>
               <div className="absolute inset-0 -translate-y-full group-hover:translate-y-0 bg-gradient-to-r from-blue-300/20 to-indigo-400/20 transition-transform duration-500"></div>
