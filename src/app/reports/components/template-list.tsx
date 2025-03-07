@@ -46,15 +46,24 @@ export function TemplateList({ onSelectTemplate }: TemplateListProps) {
       }
       
       const data = await response.json();
+      
+      // Check if data.templates exists and is an array
+      if (!data.templates || !Array.isArray(data.templates)) {
+        console.error('Invalid response format:', data);
+        throw new Error('Invalid response format from server');
+      }
+      
       // Initialize all templates with expanded=false
-      const templatesWithState = (data.templates || []).map((template: Template) => ({
+      const templatesWithState = data.templates.map((template: Template) => ({
         ...template,
         expanded: false
       }));
+      
       setTemplates(templatesWithState);
       // Clear any error if we successfully fetched (even if the array is empty)
       setError('');
     } catch (err) {
+      console.error('Error fetching templates:', err);
       setError(err.message || 'An error occurred');
     } finally {
       setIsLoading(false);

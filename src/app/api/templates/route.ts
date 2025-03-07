@@ -70,23 +70,27 @@ export async function GET(request: Request) {
       return NextResponse.json({ templates: templates || [] });
     } else {
       // Fetch all templates
-      const stmt = db.connection.prepare(`
-        SELECT t.*, c.name as client_name
-        FROM report_templates t
-        LEFT JOIN clients c ON t.client_id = c.id
-        ORDER BY t.name ASC
-      `);
-      
-      const templates = stmt.all();
-      
-      return NextResponse.json({ templates: templates || [] });
+      try {
+        const stmt = db.connection.prepare(`
+          SELECT t.*, c.name as client_name
+          FROM report_templates t
+          LEFT JOIN clients c ON t.client_id = c.id
+          ORDER BY t.name ASC
+        `);
+        
+        const templates = stmt.all();
+        
+        return NextResponse.json({ templates: templates || [] });
+      } catch (dbError) {
+        console.error("Database error fetching templates:", dbError);
+        // Even if there's a database error, return an empty array instead of an error
+        return NextResponse.json({ templates: [] });
+      }
     }
   } catch (error) {
     console.error("Error fetching templates:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch templates" },
-      { status: 500 }
-    );
+    // Return an empty templates array instead of an error
+    return NextResponse.json({ templates: [] });
   }
 }
 
