@@ -80,6 +80,16 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
   const [generationTimeMs, setGenerationTimeMs] = useState<number>(0);
   const [clipboardCopied, setClipboardCopied] = useState(false);
   
+  // Add new state variables for email processing
+  const [isProcessingEmails, setIsProcessingEmails] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState<{
+    taskId?: string;
+    progress: number;
+    totalEmails: number;
+    processedEmails: number;
+    isComplete: boolean;
+  } | null>(null);
+  
   // Set default date range (current week starting from Monday)
   useEffect(() => {
     const end = new Date();
@@ -89,19 +99,16 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
     const currentDay = start.getDay();
     
     // Calculate days to subtract to get to Monday
-    // If today is Sunday (0), we need to go back 6 days to previous Monday
-    // If today is Monday (1), we go back 0 days
-    // If today is Tuesday (2), we go back 1 day, etc.
     const daysToSubtract = currentDay === 0 ? 6 : currentDay - 1;
-    
-    // Set to the Monday of the current week
     start.setDate(start.getDate() - daysToSubtract);
     
-    // Set to midnight on that day
+    // Set time to start of day for start date and end of day for end date
     start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
     
-    setEndDate(formatDateForInput(end));
+    // Format dates for input fields
     setStartDate(formatDateForInput(start));
+    setEndDate(formatDateForInput(end));
   }, []);
   
   // Graph API notice has been removed
@@ -243,165 +250,233 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
     return date.toISOString().substring(0, 10);
   }
   
+  // Add a new function to start email processing
+  async function handleProcessEmails() {
+    if (!selectedClientId || !startDate || !endDate) {
+      setError('Please select a client and date range');
+      return;
+    }
+    
+    setError('');
+    setIsProcessingEmails(true);
+    setProcessingStatus({
+      progress: 0,
+      totalEmails: 0,
+      processedEmails: 0,
+      isComplete: false
+    });
+    
+    try {
+      const token = getUserAccessToken();
+      
+      if (!token) {
+        setError('Authentication required. Please sign in again.');
+        setIsProcessingEmails(false);
+        return;
+      }
+      
+      // Call the process-emails API to start background processing
+      const response = await fetch('/api/system/process-emails', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          clientId: selectedClientId,
+          startDate,
+          endDate,
+          maxResults: 1000 // Allow processing more emails in the background
+        })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to process emails');
+      }
+      
+      const data = await response.json();
+      console.log('Email processing started:', data);
+      
+      // Start polling for status updates
+      if (data.taskId) {
+        pollProcessingStatus(data.taskId);
+      }
+    } catch (err) {
+      console.error('Error processing emails:', err);
+      setError(err.message || 'An error occurred while processing emails');
+      setIsProcessingEmails(false);
+    }
+  }
+  
+  async function pollProcessingStatus(taskId: string) {
+    try {
+      const token = getUserAccessToken();
+      
+      if (!token) {
+        setError('Authentication required. Please sign in again.');
+        setIsProcessingEmails(false);
+        return;
+      }
+      
+      const response = await fetch(`/api/system/process-status?taskId=${taskId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to get processing status');
+      }
+      
+      const data = await response.json();
+      console.log('Processing status:', data);
+      
+      if (data.found) {
+        setProcessingStatus({
+          taskId,
+          progress: data.progress,
+          totalEmails: data.totalEmails,
+          processedEmails: data.processedEmails,
+          isComplete: data.isComplete
+        });
+        
+        // Continue polling if not complete
+        if (!data.isComplete && !data.isFailed) {
+          setTimeout(() => pollProcessingStatus(taskId), 2000);
+        } else {
+          setIsProcessingEmails(false);
+          
+          if (data.isFailed) {
+            setError(`Email processing failed: ${data.error || 'Unknown error'}`);
+          }
+        }
+      } else {
+        setIsProcessingEmails(false);
+        setError('Email processing task not found');
+      }
+    } catch (err) {
+      console.error('Error polling status:', err);
+      setError(err.message || 'An error occurred while checking processing status');
+      setIsProcessingEmails(false);
+    }
+  }
+  
+  // Modify the existing handleGenerateReport function
   async function handleGenerateReport(e: React.FormEvent) {
     e.preventDefault();
     
+    if (!selectedClientId || !selectedTemplateId || !startDate || !endDate) {
+      setError('Please fill in all required fields');
+      return;
+    }
+    
+    setError('');
+    setIsGenerating(true);
+    setGeneratedReport(null);
+    setReportHighlights([]);
+    setEmailCount(0);
+    setFromGraphApi(false);
+    
+    const startTime = Date.now();
+    
     try {
-      setIsGenerating(true);
-      setGeneratedReport('');
-      setReportHighlights([]);
-      setError('');
-      setEmailCount(0);
-      setFromGraphApi(false);
-      setShowFeedback(false);
-      
-      if (!selectedClientId) {
-        throw new Error('Please select a client');
-      }
-      
-      if (!startDate || !endDate) {
-        throw new Error('Please select a date range');
-      }
-      
-      // Get the authentication token
       const token = getUserAccessToken();
-      console.log('ReportGenerator - Access token available:', !!token);
       
       if (!token) {
-        throw new Error('Authentication required. Please sign in again.');
+        setError('Authentication required. Please sign in again.');
+        setIsGenerating(false);
+        return;
       }
       
-      // Create a unique ID for this report
-      const newReportId = crypto.randomUUID();
+      // Get the selected client
+      const client = clients.find(c => c.id === selectedClientId);
       
-      // Record the start time for performance tracking
-      const startTime = performance.now();
+      if (!client) {
+        setError('Selected client not found');
+        setIsGenerating(false);
+        return;
+      }
       
-      console.log('ReportGenerator - Sending request to generate report');
-      console.log('ReportGenerator - Request parameters:', {
+      // Prepare request body
+      const requestBody = {
+        clientId: selectedClientId,
+        templateId: selectedTemplateId,
         startDate,
         endDate,
-        format: format,
-        clientId: selectedClientId,
-        saveName,
+        format,
+        saveName: saveName || `${client.name} Report - ${startDate} to ${endDate}`,
         examplePrompt,
-        searchQuery,
         useVectorSearch,
-        reportId: newReportId,
+        searchQuery,
+        skipGraphApi: isProcessingEmails || processingStatus?.isComplete // Skip Graph API if we've processed emails
+      };
+      
+      console.log('Generating report with params:', requestBody);
+      
+      // Call the summarize API
+      const response = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(requestBody)
       });
       
-      // Get user email from session storage for debugging
-      const userEmail = typeof window !== 'undefined' ? sessionStorage.getItem('userEmail') : null;
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to generate report');
+      }
       
-      // Set a timeout for the fetch request
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
+      const endTime = Date.now();
+      const totalTime = Math.round(endTime - startTime);
+      setGenerationTimeMs(totalTime);
+      
+      let data;
+      let responseText;
       
       try {
-        const response = await fetch('/api/summarize', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-            ...(userEmail ? { 'X-User-Email': userEmail } : {})
-          },
-          body: JSON.stringify({
-            startDate,
-            endDate,
-            format: format,
-            clientId: selectedClientId,
-            saveName,
-            examplePrompt,
-            searchQuery,
-            useVectorSearch,
-            reportId: newReportId,
-          }),
-          signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-        
-        const endTime = performance.now();
-        const totalTime = Math.round(endTime - startTime);
-        setGenerationTimeMs(totalTime);
-        
-        console.log('ReportGenerator - Response received with status:', response.status);
-        
-        // Handle 404 specifically (no emails found)
-        if (response.status === 404) {
-          throw new Error('No emails found for the selected client and date range.');
-        }
-        
-        // Handle 401 specifically (authentication issues)
-        if (response.status === 401) {
-          throw new Error('Authentication required. Please sign in again.');
-        }
-        
-        // Handle 504 specifically (timeout issues)
-        if (response.status === 504) {
-          throw new Error('The request timed out. Please try again with a smaller date range or fewer emails.');
-        }
-        
-        let data;
-        let responseText;
-        
+        responseText = await response.text();
         try {
-          responseText = await response.text();
-          try {
-            data = JSON.parse(responseText);
-            console.log('ReportGenerator - Response data:', data);
-          } catch (parseError) {
-            console.error('ReportGenerator - Failed to parse response as JSON:', responseText);
-            throw new Error('Invalid response format from server. Please try again or contact support.');
-          }
-        } catch (responseError) {
-          console.error('ReportGenerator - Error reading response:', responseError);
-          throw new Error('Failed to read response from server. Please try again or contact support.');
+          data = JSON.parse(responseText);
+          console.log('ReportGenerator - Response data:', data);
+        } catch (parseError) {
+          console.error('ReportGenerator - Failed to parse response as JSON:', responseText);
+          throw new Error('Invalid response format from server. Please try again or contact support.');
         }
-        
-        if (!response.ok) {
-          console.error('ReportGenerator - Error response:', data);
-          
-          // Provide more specific error messages based on the error
-          if (data?.error?.includes('OpenAI API')) {
-            throw new Error(`OpenAI API error: ${data.message || data.error || 'Unknown error'}`);
-          }
-          
-          throw new Error(data?.message || data?.error || `Failed to generate report (${response.status})`);
-        }
-        
-        if (!data || !data.report) {
-          console.error('ReportGenerator - Missing report data in response');
-          throw new Error('Server returned an empty report. Please try again.');
-        }
-        
-        console.log('ReportGenerator - Generated report data:', data);
-        setGeneratedReport(data.report);
-        setReportHighlights(data.highlights || []);
-        setEmailCount(data.emailCount || 0);
-        
-        // Check if any emails came from Graph API
-        if (data.fromGraphApi) {
-          console.log('Report includes emails from Microsoft Graph API');
-          setFromGraphApi(true);
-        } else {
-          setFromGraphApi(false);
-        }
-        
-        // Show feedback prompt after 10 seconds to allow user to read the report
-        setTimeout(() => {
-          setShowFeedback(true);
-        }, 10000);
-        
-        // Notify parent component if callback provided
-        if (onReportGenerated) {
-          onReportGenerated();
-        }
-      } catch (fetchError) {
-        if (fetchError.name === 'AbortError') {
-          throw new Error('The request took too long to complete. Please try again with a smaller date range.');
-        }
-        throw fetchError;
+      } catch (responseError) {
+        console.error('ReportGenerator - Error reading response:', responseError);
+        throw new Error('Failed to read response from server. Please try again or contact support.');
+      }
+      
+      if (!data || !data.report) {
+        console.error('ReportGenerator - Missing report data in response');
+        throw new Error('Server returned an empty report. Please try again.');
+      }
+      
+      console.log('ReportGenerator - Generated report data:', data);
+      setGeneratedReport(data.report);
+      setReportHighlights(data.highlights || []);
+      setEmailCount(data.emailCount || 0);
+      
+      // Check if any emails came from Graph API
+      if (data.fromGraphApi) {
+        console.log('Report includes emails from Microsoft Graph API');
+        setFromGraphApi(true);
+      } else {
+        setFromGraphApi(false);
+      }
+      
+      // Show feedback prompt after 10 seconds to allow user to read the report
+      setTimeout(() => {
+        setShowFeedback(true);
+      }, 10000);
+      
+      // Notify parent component if callback provided
+      if (onReportGenerated) {
+        onReportGenerated();
       }
     } catch (err) {
       console.error('ReportGenerator - Error generating report:', err);
@@ -453,73 +528,18 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
         </div>
       )}
       
-      {generatedReport ? (
-        <div className="space-y-6">
-          <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-6">
-            <h3 className="text-lg font-medium mb-4 dark:text-white">Generated Report</h3>
-            
-            <div className="prose dark:prose-invert max-w-none">
-              <div dangerouslySetInnerHTML={{ __html: generatedReport.replace(/\n/g, '<br>') }} />
-            </div>
-            
-            {/* Report metadata section removed */}
-          </div>
-          
-          <div className="flex justify-between">
-            <button
-              onClick={() => setGeneratedReport(null)}
-              className="relative px-4 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-indigo-600 rounded-md shadow-sm overflow-hidden group"
-            >
-              <span className="relative z-10">Generate Another Report</span>
-              <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-              <div className="absolute inset-0 border-0 group-hover:border group-hover:border-white group-hover:border-opacity-30 rounded-md transition-all duration-300"></div>
-              <div className="absolute inset-0 -translate-y-full group-hover:translate-y-0 bg-gradient-to-r from-blue-300/20 to-indigo-400/20 transition-transform duration-500"></div>
-            </button>
-            
-            <button
-              onClick={() => {
-                // Copy to clipboard
-                navigator.clipboard.writeText(generatedReport);
-                setClipboardCopied(true);
-                
-                // Track clipboard copy in feedback data
-                fetch('/api/feedback/action', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({
-                    reportId,
-                    action: 'clipboard_copy',
-                    timestamp: new Date().toISOString(),
-                  }),
-                }).catch(error => {
-                  console.error('Error logging clipboard action:', error);
-                });
-                
-                alert('Report copied to clipboard');
-              }}
-              className="relative px-4 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-green-500 to-emerald-600 rounded-md shadow-sm overflow-hidden group"
-            >
-              <span className="relative z-10">Copy to Clipboard</span>
-              <div className="absolute inset-0 bg-gradient-to-r from-green-400 to-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-              <div className="absolute inset-0 border-0 group-hover:border group-hover:border-white group-hover:border-opacity-30 rounded-md transition-all duration-300"></div>
-              <div className="absolute inset-0 -translate-y-full group-hover:translate-y-0 bg-gradient-to-r from-green-300/20 to-emerald-400/20 transition-transform duration-500"></div>
-            </button>
-          </div>
-        </div>
-      ) : (
+      {selectedClientId && (
         <form onSubmit={handleGenerateReport} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label htmlFor="clientId" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Client *
+              <label htmlFor="client" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Client <span className="text-red-500">*</span>
               </label>
               <select
-                id="clientId"
+                id="client"
                 value={selectedClientId || ''}
                 onChange={(e) => setSelectedClientId(e.target.value || null)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
                 required
               >
                 <option value="">Select a client</option>
@@ -529,12 +549,6 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
                   </option>
                 ))}
               </select>
-              
-              {clients.length === 0 && (
-                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                  No clients available. <Link href="/reports" className="text-blue-600 hover:text-blue-500 dark:text-blue-400">Add a client</Link> first.
-                </p>
-              )}
             </div>
             
             <div>
@@ -558,32 +572,86 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
             </div>
             
             <div>
-              <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Start Date *
+              <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Start Date <span className="text-red-500">*</span>
               </label>
               <input
                 type="date"
                 id="startDate"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
                 required
               />
             </div>
             
             <div>
-              <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                End Date *
+              <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                End Date <span className="text-red-500">*</span>
               </label>
               <input
                 type="date"
                 id="endDate"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white sm:text-sm"
                 required
               />
             </div>
+          </div>
+          
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={handleProcessEmails}
+              disabled={isProcessingEmails || !selectedClientId || !startDate || !endDate}
+              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isProcessingEmails ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Processing Emails...
+                </>
+              ) : processingStatus?.isComplete ? (
+                <>
+                  <svg className="h-4 w-4 mr-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                  Emails Processed
+                </>
+              ) : (
+                <>
+                  <svg className="h-4 w-4 mr-2 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                  </svg>
+                  Process Emails
+                </>
+              )}
+            </button>
+            
+            {/* Processing Status */}
+            {isProcessingEmails && processingStatus && (
+              <div className="mt-2">
+                <div className="text-sm text-gray-600 dark:text-gray-400">
+                  Processing {processingStatus.processedEmails} of {processingStatus.totalEmails || '?'} emails ({processingStatus.progress}%)
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2.5 mt-1 dark:bg-gray-700">
+                  <div 
+                    className="bg-blue-600 h-2.5 rounded-full" 
+                    style={{ width: `${processingStatus.progress}%` }}
+                  ></div>
+                </div>
+              </div>
+            )}
+            
+            {processingStatus?.isComplete && (
+              <div className="mt-2 text-sm text-green-600 dark:text-green-400">
+                Successfully processed {processingStatus.processedEmails} emails. You can now generate a report without timeouts.
+              </div>
+            )}
           </div>
           
           <div>

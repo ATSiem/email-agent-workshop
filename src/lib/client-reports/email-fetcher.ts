@@ -10,8 +10,9 @@ interface EmailParams {
   clientDomains?: string[];
   clientEmails?: string[];
   maxResults?: number;
-  searchQuery?: string;  // New: Support semantic search
-  useVectorSearch?: boolean; // New: Flag to enable vector search
+  searchQuery?: string;  // Support semantic search
+  useVectorSearch?: boolean; // Flag to enable vector search
+  skipGraphApi?: boolean; // Skip Graph API calls when using pre-processed emails
 }
 
 // Function to get emails from both database and Microsoft Graph API
@@ -26,7 +27,8 @@ export async function getClientEmails(params: EmailParams) {
       clientEmails = [], 
       maxResults = process.env.EMAIL_FETCH_LIMIT ? parseInt(process.env.EMAIL_FETCH_LIMIT) : 500,
       searchQuery,
-      useVectorSearch = false
+      useVectorSearch = false,
+      skipGraphApi = false
     } = params;
     
     console.log('EmailFetcher - Original client domains:', clientDomains);
@@ -98,62 +100,71 @@ export async function getClientEmails(params: EmailParams) {
       dbEmails = sqlEmails;
     }
     
-    // Queue a background task to process any new emails
-    // Use configurable batch size from environment or a reasonable default
-    const batchSize = process.env.EMAIL_PROCESSING_BATCH_SIZE ? 
-      parseInt(process.env.EMAIL_PROCESSING_BATCH_SIZE) : 200;
+    // If we have enough emails from the database or skipGraphApi is true, return them
+    if (dbEmails.length >= maxResults || skipGraphApi) {
+      console.log(`EmailFetcher - Using ${dbEmails.length} emails from database only`);
+      return {
+        emails: dbEmails.slice(0, maxResults),
+        fromGraphApi: false
+      };
+    }
     
-    queueBackgroundTask('process_new_emails', { limit: batchSize });
-    
-    // Try to fetch emails from Graph API if we have access
-    let graphEmails = [];
-    let fromGraphApi = false;
+    // Otherwise, try to fetch additional emails from Graph API
+    console.log('EmailFetcher - Fetching additional emails from Graph API');
     
     try {
-      // Get Microsoft Graph client
-      const client = getGraphClient();
+      // Only fetch from Graph API if we don't have enough emails from the database
+      const graphEmails = await getClientEmailsFromGraph(enhancedParams);
+      console.log(`EmailFetcher - Found ${graphEmails.length} emails from Graph API`);
       
-      if (client) {
-        // Get emails from Graph API filtered by client domains/emails
-        graphEmails = await getClientEmailsFromGraph(enhancedParams);
-        console.log(`EmailFetcher - Found ${graphEmails.length} emails from Graph API`);
-        fromGraphApi = graphEmails.length > 0;
+      // Combine emails from both sources, removing duplicates
+      const allEmails = [...dbEmails];
+      const dbEmailIds = new Set(dbEmails.map(email => email.id));
+      
+      for (const email of graphEmails) {
+        if (!dbEmailIds.has(email.id)) {
+          allEmails.push(email);
+        }
       }
-    } catch (error) {
-      console.error('EmailFetcher - Error fetching from Graph API:', error);
-      // Continue with just the database emails
+      
+      console.log(`EmailFetcher - Combined total: ${allEmails.length} emails`);
+      
+      // Queue background task to process new emails for future use
+      if (graphEmails.length > 0) {
+        try {
+          const emailIds = graphEmails.map(email => email.id);
+          queueBackgroundTask('process_new_emails', { emailIds });
+        } catch (queueError) {
+          console.error('EmailFetcher - Error queueing background task:', queueError);
+          // Continue even if queueing fails
+        }
+      }
+      
+      return {
+        emails: allEmails.slice(0, maxResults),
+        fromGraphApi: graphEmails.length > 0
+      };
+    } catch (graphError) {
+      console.error('EmailFetcher - Error fetching from Graph API:', graphError);
+      
+      // If Graph API fails, just return what we have from the database
+      console.log(`EmailFetcher - Falling back to ${dbEmails.length} emails from database only`);
+      return {
+        emails: dbEmails.slice(0, maxResults),
+        fromGraphApi: false,
+        error: graphError.message
+      };
     }
-    
-    // Combine emails from both sources and deduplicate
-    let allEmails = [...dbEmails, ...graphEmails];
-    
-    // Deduplicate based on email ID
-    const emailMap = new Map();
-    for (const email of allEmails) {
-      emailMap.set(email.id, email);
-    }
-    
-    // Convert back to array
-    allEmails = Array.from(emailMap.values());
-    
-    // Sort by date (newest first) - unless we're using vector search, which already orders by relevance
-    if (!useVectorSearch) {
-      allEmails.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    }
-    
-    // Limit the number of results
-    if (maxResults && allEmails.length > maxResults) {
-      allEmails = allEmails.slice(0, maxResults);
-    }
-    
-    return {
-      emails: allEmails,
-      fromGraphApi,
-      vectorSearchUsed: useVectorSearch && !!searchQuery
-    };
   } catch (error) {
-    console.error('EmailFetcher - Error getting comprehensive emails:', error);
-    throw error;
+    console.error('EmailFetcher - Error in getClientEmails:', error);
+    
+    // Return an empty result with error information rather than throwing
+    // This prevents the entire application from crashing on email fetch errors
+    return {
+      emails: [],
+      fromGraphApi: false,
+      error: error.message || 'An error occurred while fetching emails'
+    };
   }
 }
 

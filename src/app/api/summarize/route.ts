@@ -22,6 +22,7 @@ const summarizeRequestSchema = z.object({
   examplePrompt: z.string().nullable().optional(), // Optional examples/instructions for the template
   searchQuery: z.string().optional(), // Optional semantic search query
   useVectorSearch: z.boolean().optional(), // Whether to use vector search
+  skipGraphApi: z.boolean().optional(), // Whether to skip Graph API calls and use only pre-processed emails
 });
 
 export async function POST(request: Request) {
@@ -153,78 +154,54 @@ export async function POST(request: Request) {
       }
     }
     
-    // Use our client email fetcher
-    console.log('Summarize API - Fetching client emails for date range:', 
-      data.startDate, 'to', data.endDate);
+    // Fetch emails for the client
+    console.log('Summarize API - Fetching emails for client');
     
-    // Ensure date strings are properly formatted ISO strings
-    // This adds a layer of safety in case the client sends malformed dates
-    let startDateIso = data.startDate;
-    let endDateIso = data.endDate;
+    // Normalize date strings
+    const startDateObj = new Date(data.startDate);
+    startDateObj.setUTCHours(0, 0, 0, 0);
+    const startDateIso = startDateObj.toISOString();
     
-    try {
-      // Ensure startDate is a valid ISO date string with full UTC day coverage
-      const startDate = new Date(data.startDate);
-      startDate.setUTCHours(0, 0, 0, 0);
-      startDateIso = startDate.toISOString();
-      
-      // Ensure endDate is a valid ISO date string with full UTC day coverage  
-      const endDate = new Date(data.endDate);
-      endDate.setUTCHours(23, 59, 59, 999);
-      endDateIso = endDate.toISOString();
-      
-      console.log('Summarize API - Using normalized date range:');
-      console.log(`  - Original startDate: ${data.startDate}`);
-      console.log(`  - Original endDate: ${data.endDate}`);
-      console.log(`  - Normalized startDate: ${startDateIso}`);
-      console.log(`  - Normalized endDate: ${endDateIso}`);
-    } catch (err) {
-      console.error('Summarize API - Error normalizing dates:', err);
-      // Continue with original dates if normalization fails
-    }
+    const endDateObj = new Date(data.endDate);
+    endDateObj.setUTCHours(23, 59, 59, 999);
+    const endDateIso = endDateObj.toISOString();
     
-    // Get emails from database AND Microsoft Graph if needed
-    let emailResult;
-    try {
-      // Use the normalized date strings for the query
-      // Get environment variable for max emails or use a sensible default
-      const maxFetchLimit = env.EMAIL_FETCH_LIMIT ? 
-        parseInt(String(env.EMAIL_FETCH_LIMIT)) : 1000; // Default to 1000 if not specified
-        
-      emailResult = await getClientEmails({
-        startDate: startDateIso,
-        endDate: endDateIso,
-        clientDomains: clientDomains,
-        clientEmails: clientEmails,
-        maxResults: maxFetchLimit,
-        searchQuery: data.searchQuery,
-        useVectorSearch: data.useVectorSearch || false
-      });
-      
-      // Check if we have emails
-      if (!emailResult.emails || emailResult.emails.length === 0) {
-        console.log('Summarize API - No emails found anywhere');
-        return NextResponse.json({
-          error: "No emails found for the given criteria",
-          emailCount: 0
-        }, { status: 404 });
-      }
-      
-      console.log(`Summarize API - Found ${emailResult.emails.length} emails, ${emailResult.fromGraphApi ? 'including' : 'not including'} from Graph API`);
-      
-      // Verify email format is what we expect
-      if (emailResult.emails.length > 0) {
-        console.log('Summarize API - Sample email fields:', Object.keys(emailResult.emails[0]));
-      }
-    } catch (err) {
-      console.error('Summarize API - Error fetching emails:', err);
-      return NextResponse.json({
-        error: "Error fetching emails: " + (err.message || String(err))
-      }, { status: 500 });
-    }
+    // Calculate model parameters based on environment
+    const { maxEmails, maxTokens } = calculateEmailProcessingParams();
     
-    // Set shorthand for emails
+    // Fetch emails
+    const emailResult = await getClientEmails({
+      startDate: startDateIso,
+      endDate: endDateIso,
+      clientDomains: clientDomains,
+      clientEmails: clientEmails,
+      maxResults: maxEmails,
+      searchQuery: data.searchQuery,
+      useVectorSearch: data.useVectorSearch,
+      skipGraphApi: data.skipGraphApi // Use the skipGraphApi parameter
+    });
+    
     const emails = emailResult.emails;
+    const fromGraphApi = emailResult.fromGraphApi;
+    
+    // Check if we have an error from email fetching
+    if (emailResult.error) {
+      console.error('Summarize API - Error from email fetcher:', emailResult.error);
+      // Continue with any emails we have, but log the error
+    }
+    
+    console.log(`Summarize API - Found ${emails.length} emails`);
+    
+    if (emails.length === 0) {
+      console.log('Summarize API - No emails found');
+      return NextResponse.json(
+        { 
+          error: "No emails found",
+          message: "No emails were found for the selected client and date range"
+        },
+        { status: 404 }
+      );
+    }
     
     // Generate the summary using AI
     console.log('Summarize API - Generating report with AI');
@@ -586,7 +563,7 @@ export async function POST(request: Request) {
       report: result.object.report,
       highlights: result.object.highlights,
       emailCount: emails.length,
-      fromGraphApi: emailResult.fromGraphApi
+      fromGraphApi: fromGraphApi
     });
   } catch (error) {
     console.error("Error generating summary:", error);

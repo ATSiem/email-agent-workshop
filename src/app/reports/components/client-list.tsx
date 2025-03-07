@@ -71,10 +71,36 @@ export const ClientList = forwardRef<{ refreshClients: () => Promise<void> }, Cl
         const data = await response.json();
         console.log('ClientList - Response data:', data);
         
-        setClients(data.clients || []);
+        // Store clients in state and also in localStorage as a backup
+        const clientsData = data.clients || [];
+        setClients(clientsData);
+        
+        // Save to localStorage as a backup
+        if (typeof window !== 'undefined' && clientsData.length > 0) {
+          try {
+            localStorage.setItem('cachedClients', JSON.stringify(clientsData));
+            console.log('ClientList - Saved clients to localStorage');
+          } catch (storageError) {
+            console.error('ClientList - Error saving to localStorage:', storageError);
+          }
+        }
       } catch (err) {
         console.error('ClientList - Error fetching clients:', err);
         setError(err.message || 'An error occurred while fetching clients');
+        
+        // Try to load clients from localStorage if available
+        if (typeof window !== 'undefined') {
+          try {
+            const cachedClients = localStorage.getItem('cachedClients');
+            if (cachedClients) {
+              const parsedClients = JSON.parse(cachedClients);
+              console.log('ClientList - Loaded clients from localStorage:', parsedClients);
+              setClients(parsedClients);
+            }
+          } catch (storageError) {
+            console.error('ClientList - Error loading from localStorage:', storageError);
+          }
+        }
       } finally {
         setLoading(false);
       }
@@ -85,8 +111,23 @@ export const ClientList = forwardRef<{ refreshClients: () => Promise<void> }, Cl
       refreshClients: fetchClients
     }));
     
-    // Fetch clients on mount
+    // Load cached clients on mount before fetching from API
     useEffect(() => {
+      // Try to load clients from localStorage first for immediate display
+      if (typeof window !== 'undefined') {
+        try {
+          const cachedClients = localStorage.getItem('cachedClients');
+          if (cachedClients) {
+            const parsedClients = JSON.parse(cachedClients);
+            console.log('ClientList - Initial load from localStorage:', parsedClients);
+            setClients(parsedClients);
+          }
+        } catch (storageError) {
+          console.error('ClientList - Error loading from localStorage:', storageError);
+        }
+      }
+      
+      // Then fetch from API
       fetchClients();
     }, [fetchClients]);
     
