@@ -13,15 +13,14 @@ const getRedirectUri = (): string => {
       return 'https://client-reports.onrender.com/api/auth/callback';
     }
     
-    // For localhost, use the development redirect URI - always use port 3000
+    // For localhost, always use port 3000 regardless of what port we're actually on
     if (hostname === 'localhost') {
-      // If for some reason we're on port 10000 (which seems to be happening),
-      // we still tell MSAL to use port 3000 as redirect
       return 'http://localhost:3000/api/auth/callback';
     }
   }
   
-  // Default to the environment variable
+  // Default to the environment variable - this is important for server-side rendering
+  // where window is undefined
   return process.env.NEXT_PUBLIC_AZURE_REDIRECT_URI || '';
 };
 
