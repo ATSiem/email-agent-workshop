@@ -139,7 +139,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           // Clean URL
           if (isRedirectCallback && window.history) {
+            console.log('Cleaning URL after successful authentication');
             window.history.replaceState({}, document.title, window.location.pathname);
+            
+            // If we're on an unexpected URL (like localhost:10000), redirect to the app's home
+            if (window.location.hostname === 'localhost' && 
+                window.location.port !== '3000' && 
+                window.location.port !== '') {
+              console.log('Detected incorrect port, redirecting to correct development URL');
+              window.location.href = 'http://localhost:3000';
+              return;
+            }
           }
         } else {
           // Check if we have an active account
@@ -221,7 +231,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           // Clean URL if it has authorization code
           if (isRedirectCallback && window.history) {
+            console.log('Cleaning URL after authentication');
             window.history.replaceState({}, document.title, window.location.pathname);
+            
+            // If we're on an unexpected URL (like localhost:10000), redirect to the app's home
+            if (window.location.hostname === 'localhost' && 
+                window.location.port !== '3000' && 
+                window.location.port !== '') {
+              console.log('Detected incorrect port, redirecting to correct development URL');
+              window.location.href = 'http://localhost:3000';
+              return;
+            }
           }
         }
       } catch (e) {
@@ -232,7 +252,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         
         // Clean URL even on error
         if (window.location.hash && window.history) {
+          console.log('Cleaning URL after authentication error');
           window.history.replaceState({}, document.title, window.location.pathname);
+          
+          // If we're on an unexpected URL (like localhost:10000), redirect to the app's home
+          if (window.location.hostname === 'localhost' && 
+              window.location.port !== '3000' && 
+              window.location.port !== '') {
+            console.log('Detected incorrect port, redirecting to correct development URL');
+            window.location.href = 'http://localhost:3000';
+            return;
+          }
         }
       } finally {
         setIsLoading(false);

@@ -3,13 +3,33 @@ import { PublicClientApplication, Configuration, AccountInfo, AuthenticationResu
 // Singleton MSAL instance
 let msalInstance: PublicClientApplication | null = null;
 
+// Determine the appropriate redirect URI based on the current hostname
+const getRedirectUri = (): string => {
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    
+    // For client-reports.onrender.com, use the production redirect URI
+    if (hostname === 'client-reports.onrender.com') {
+      return 'https://client-reports.onrender.com/api/auth/callback';
+    }
+    
+    // For localhost, use the development redirect URI
+    if (hostname === 'localhost') {
+      return 'http://localhost:3000/api/auth/callback';
+    }
+  }
+  
+  // Default to the environment variable
+  return process.env.NEXT_PUBLIC_AZURE_REDIRECT_URI || '';
+};
+
 // Base MSAL configuration
 const msalConfig: Configuration = {
   auth: {
     clientId: process.env.NEXT_PUBLIC_AZURE_CLIENT_ID || '',
     authority: `https://login.microsoftonline.com/${process.env.NEXT_PUBLIC_AZURE_TENANT_ID || 'common'}`,
-    // Use the configured redirect URI from environment variables
-    redirectUri: process.env.NEXT_PUBLIC_AZURE_REDIRECT_URI,
+    // Use the dynamically determined redirect URI
+    redirectUri: getRedirectUri(),
     navigateToLoginRequestUrl: true,
   },
   cache: {
@@ -25,7 +45,18 @@ export function getMsalInstance(): PublicClientApplication {
   }
   
   if (!msalInstance) {
-    msalInstance = new PublicClientApplication(msalConfig);
+    // Create new configuration with current redirect URI
+    const currentMsalConfig = {
+      ...msalConfig,
+      auth: {
+        ...msalConfig.auth,
+        redirectUri: getRedirectUri(),
+      }
+    };
+    
+    console.log('Initializing MSAL with redirect URI:', currentMsalConfig.auth.redirectUri);
+    
+    msalInstance = new PublicClientApplication(currentMsalConfig);
     // Initialize the instance
     msalInstance.initialize().catch(e => {
       console.error('Failed to initialize MSAL instance:', e);
