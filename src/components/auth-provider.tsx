@@ -77,9 +77,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Initialize authentication
   useEffect(() => {
+    // Special case to handle redirects for both production and local development
+    if (typeof window !== 'undefined' && window.location.hash && window.location.hash.includes('code=')) {
+      const hostname = window.location.hostname;
+      
+      // For client-reports.onrender.com
+      if (hostname === 'client-reports.onrender.com' && window.location.pathname === '/') {
+        console.log('Detected production site redirect with auth code, redirecting to callback URL');
+        
+        // Save the hash to sessionStorage
+        sessionStorage.setItem('msalAuthHash', window.location.hash);
+        
+        // Redirect to the correct callback URL
+        window.location.href = 'https://client-reports.onrender.com/api/auth/callback';
+        return;
+      }
+      
+      // For localhost:10000
+      if (hostname === 'localhost' && window.location.port === '10000') {
+        console.log('Detected localhost:10000 redirect with auth code, redirecting to correct URL');
+        
+        // Save the hash to sessionStorage
+        sessionStorage.setItem('msalAuthHash', window.location.hash);
+        
+        // Redirect to the correct URL
+        window.location.href = 'http://localhost:3000/';
+        return;
+      }
+    }
+    
     const initialize = async () => {
       setIsLoading(true);
       setError(null);
+      
+      // Check if we have a saved hash from a previous redirect
+      const savedHash = sessionStorage.getItem('msalAuthHash');
+      const hostname = window.location.hostname;
+      
+      // For production on the callback page
+      if (savedHash && hostname === 'client-reports.onrender.com' && 
+          window.location.pathname === '/api/auth/callback') {
+        console.log('Found saved auth hash for production callback, applying it');
+        window.location.hash = savedHash;
+        sessionStorage.removeItem('msalAuthHash'); // Clean up
+      }
+      
+      // For localhost on port 3000
+      if (savedHash && hostname === 'localhost' && window.location.port === '3000') {
+        console.log('Found saved auth hash from localhost:10000 redirect, applying it');
+        window.location.hash = savedHash;
+        sessionStorage.removeItem('msalAuthHash'); // Clean up
+      }
       
       try {
         // Check for the hash in the URL which indicates a redirect from Microsoft
@@ -142,8 +190,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.log('Cleaning URL after successful authentication');
             window.history.replaceState({}, document.title, window.location.pathname);
             
+            const hostname = window.location.hostname;
+            
+            // If we're on the callback URL for production, redirect to home
+            if (hostname === 'client-reports.onrender.com' && 
+                window.location.pathname === '/api/auth/callback') {
+              console.log('Detected callback URL in production, redirecting to home');
+              window.location.href = 'https://client-reports.onrender.com/';
+              return;
+            }
+            
             // If we're on an unexpected URL (like localhost:10000), redirect to the app's home
-            if (window.location.hostname === 'localhost' && 
+            if (hostname === 'localhost' && 
                 window.location.port !== '3000' && 
                 window.location.port !== '') {
               console.log('Detected incorrect port, redirecting to correct development URL');
@@ -234,8 +292,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             console.log('Cleaning URL after authentication');
             window.history.replaceState({}, document.title, window.location.pathname);
             
+            const hostname = window.location.hostname;
+            
+            // If we're on the callback URL for production, redirect to home
+            if (hostname === 'client-reports.onrender.com' && 
+                window.location.pathname === '/api/auth/callback') {
+              console.log('Detected callback URL in production, redirecting to home');
+              window.location.href = 'https://client-reports.onrender.com/';
+              return;
+            }
+            
             // If we're on an unexpected URL (like localhost:10000), redirect to the app's home
-            if (window.location.hostname === 'localhost' && 
+            if (hostname === 'localhost' && 
                 window.location.port !== '3000' && 
                 window.location.port !== '') {
               console.log('Detected incorrect port, redirecting to correct development URL');
@@ -255,8 +323,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.log('Cleaning URL after authentication error');
           window.history.replaceState({}, document.title, window.location.pathname);
           
+          const hostname = window.location.hostname;
+          
+          // If we're on the callback URL for production, redirect to home
+          if (hostname === 'client-reports.onrender.com' && 
+              window.location.pathname === '/api/auth/callback') {
+            console.log('Detected callback URL in production, redirecting to home');
+            window.location.href = 'https://client-reports.onrender.com/';
+            return;
+          }
+          
           // If we're on an unexpected URL (like localhost:10000), redirect to the app's home
-          if (window.location.hostname === 'localhost' && 
+          if (hostname === 'localhost' && 
               window.location.port !== '3000' && 
               window.location.port !== '') {
             console.log('Detected incorrect port, redirecting to correct development URL');
@@ -282,6 +360,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearMsalCache();
       sessionStorage.removeItem('msGraphToken');
       sessionStorage.removeItem('userEmail');
+      sessionStorage.removeItem('msalAuthHash'); // Clear any saved auth hash
       
       // Redirect to Microsoft login
       await loginWithMicrosoft();
@@ -307,6 +386,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAccessToken(null);
       sessionStorage.removeItem('msGraphToken');
       sessionStorage.removeItem('userEmail');
+      sessionStorage.removeItem('msalAuthHash'); // Clear any saved auth hash
       
       // Clear MSAL cache
       clearMsalCache();
@@ -323,6 +403,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAccessToken(null);
       sessionStorage.removeItem('msGraphToken');
       sessionStorage.removeItem('userEmail');
+      sessionStorage.removeItem('msalAuthHash'); // Clear any saved auth hash
       clearMsalCache();
       setIsLoading(false);
     }
