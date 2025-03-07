@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "~/lib/db";
 import { getUserAccessToken, setUserAccessToken } from "~/lib/auth/microsoft";
-import { clients } from "~/lib/db/pg-schema"; // Import the clients table schema
+import { clients, reportFeedback, reportTemplates } from "~/lib/db/pg-schema"; // Import the table schemas
+import { pgDb } from "~/lib/db/postgres"; // Import the Postgres DB connection
+import { eq } from "drizzle-orm"; // Import the eq operator for where clauses
+import * as schema from "~/lib/db/pg-schema"; // Import all schemas
 
 // Schema for creating/updating a client
 const clientSchema = z.object({
@@ -259,7 +262,7 @@ export async function POST(request: Request) {
         // Use Postgres-compatible syntax
         try {
           console.log('POST /api/clients - Using Postgres insert');
-          await db.insert('clients', {
+          await db.insert(clients, {
             id: clientId,
             name: data.name,
             domains: JSON.stringify(data.domains),
@@ -394,24 +397,9 @@ export async function PUT(request: Request) {
     // Set the token for Graph API calls that might happen later
     setUserAccessToken(accessToken);
     
-    // Ensure the clients table exists
-    try {
-      console.log('PUT /api/clients - Ensuring clients table exists');
-      db.connection.prepare(`
-        CREATE TABLE IF NOT EXISTS clients (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          domains TEXT NOT NULL,
-          emails TEXT NOT NULL,
-          created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-          updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-        )
-      `).run();
-      console.log('PUT /api/clients - Clients table check completed');
-    } catch (tableError) {
-      console.error('PUT /api/clients - Error ensuring clients table exists:', tableError);
-      // Continue with the request, as the table might already exist
-    }
+    // Check if we're using Postgres
+    const usePostgres = process.env.NODE_ENV === 'production' || process.env.DATABASE_TYPE === 'postgres';
+    console.log('PUT /api/clients - Using Postgres:', usePostgres);
     
     // Get client ID from URL
     const url = new URL(request.url);
@@ -428,30 +416,92 @@ export async function PUT(request: Request) {
     const body = await request.json();
     const data = clientSchema.parse(body);
     
-    // Check if client exists
-    const checkStmt = db.connection.prepare(`
-      SELECT id FROM clients WHERE id = ?
-    `);
-    
-    const existingClient = checkStmt.get(clientId);
-    
-    if (!existingClient) {
-      return NextResponse.json({ error: "Client not found" }, { status: 404 });
+    if (usePostgres) {
+      // Use Postgres-compatible syntax for update
+      try {
+        console.log('PUT /api/clients - Using Postgres update');
+        
+        // First check if client exists
+        const existingClient = await db.query.clients.findFirst({
+          where: [{ name: 'eq', column: 'id', value: clientId }]
+        });
+        
+        if (!existingClient) {
+          return NextResponse.json({ error: "Client not found" }, { status: 404 });
+        }
+        
+        // Update client using schema
+        await pgDb.update(schema.clients)
+          .set({
+            name: data.name,
+            domains: JSON.stringify(data.domains),
+            emails: JSON.stringify(data.emails),
+          })
+          .where(eq(schema.clients.id, clientId));
+        console.log('PUT /api/clients - Postgres update successful');
+      } catch (pgError) {
+        console.error('PUT /api/clients - Postgres update error:', pgError);
+        return NextResponse.json(
+          { 
+            error: "Database error", 
+            message: "Failed to update client in Postgres database",
+            details: pgError.message
+          },
+          { status: 500 }
+        );
+      }
+    } else {
+      // For SQLite, use the previous implementation
+      try {
+        // Ensure the clients table exists
+        console.log('PUT /api/clients - Ensuring clients table exists for SQLite');
+        db.connection.prepare(`
+          CREATE TABLE IF NOT EXISTS clients (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            domains TEXT NOT NULL,
+            emails TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+          )
+        `).run();
+        
+        // Check if client exists
+        const checkStmt = db.connection.prepare(`
+          SELECT id FROM clients WHERE id = ?
+        `);
+        
+        const existingClient = checkStmt.get(clientId);
+        
+        if (!existingClient) {
+          return NextResponse.json({ error: "Client not found" }, { status: 404 });
+        }
+        
+        // Update the client
+        const updateStmt = db.connection.prepare(`
+          UPDATE clients
+          SET name = ?, domains = ?, emails = ?, updated_at = unixepoch()
+          WHERE id = ?
+        `);
+        
+        updateStmt.run(
+          data.name,
+          JSON.stringify(data.domains),
+          JSON.stringify(data.emails),
+          clientId
+        );
+      } catch (sqliteError) {
+        console.error('PUT /api/clients - SQLite update error:', sqliteError);
+        return NextResponse.json(
+          { 
+            error: "Database error", 
+            message: "Failed to update client in SQLite database",
+            details: sqliteError.message
+          },
+          { status: 500 }
+        );
+      }
     }
-    
-    // Update the client
-    const updateStmt = db.connection.prepare(`
-      UPDATE clients
-      SET name = ?, domains = ?, emails = ?, updated_at = unixepoch()
-      WHERE id = ?
-    `);
-    
-    updateStmt.run(
-      data.name,
-      JSON.stringify(data.domains),
-      JSON.stringify(data.emails),
-      clientId
-    );
     
     return NextResponse.json({
       id: clientId,
@@ -522,43 +572,102 @@ export async function DELETE(request: Request) {
       );
     }
     
-    // Check if client exists
-    const checkStmt = db.connection.prepare(`
-      SELECT id FROM clients WHERE id = ?
-    `);
+    // Check if we're using Postgres
+    const usePostgres = process.env.NODE_ENV === 'production' || process.env.DATABASE_TYPE === 'postgres';
+    console.log('DELETE /api/clients - Using Postgres:', usePostgres);
     
-    const existingClient = checkStmt.get(clientId);
-    
-    if (!existingClient) {
-      return NextResponse.json({ error: "Client not found" }, { status: 404 });
+    if (usePostgres) {
+      try {
+        console.log('DELETE /api/clients - Using Postgres delete');
+        
+        // First check if client exists
+        const existingClient = await db.query.clients.findFirst({
+          where: [{ name: 'eq', column: 'id', value: clientId }]
+        });
+        
+        if (!existingClient) {
+          return NextResponse.json({ error: "Client not found" }, { status: 404 });
+        }
+        
+        // First, delete any associated report feedback
+        try {
+          // Using the Postgres-compatible SQL through drizzle
+          await pgDb.delete(schema.reportFeedback).where(eq(schema.reportFeedback.clientId, clientId));
+          console.log(`Deleted report feedback for client ${clientId}`);
+        } catch (feedbackError) {
+          console.error("Error deleting client feedback:", feedbackError);
+          // Continue with deletion even if feedback deletion fails
+        }
+        
+        // Next, delete any associated report templates  
+        await pgDb.delete(schema.reportTemplates).where(eq(schema.reportTemplates.clientId, clientId));
+        
+        // Then delete the client
+        await pgDb.delete(schema.clients).where(eq(schema.clients.id, clientId));
+        console.log('DELETE /api/clients - Postgres delete successful');
+      } catch (pgError) {
+        console.error('DELETE /api/clients - Postgres delete error:', pgError);
+        return NextResponse.json(
+          { 
+            error: "Database error", 
+            message: "Failed to delete client from Postgres database",
+            details: pgError.message
+          },
+          { status: 500 }
+        );
+      }
+    } else {
+      // For SQLite, use the previous implementation
+      try {
+        // Check if client exists
+        const checkStmt = db.connection.prepare(`
+          SELECT id FROM clients WHERE id = ?
+        `);
+        
+        const existingClient = checkStmt.get(clientId);
+        
+        if (!existingClient) {
+          return NextResponse.json({ error: "Client not found" }, { status: 404 });
+        }
+        
+        // First, delete any associated report feedback
+        try {
+          const deleteFeedbackStmt = db.connection.prepare(`
+            DELETE FROM report_feedback WHERE client_id = ?
+          `);
+          
+          deleteFeedbackStmt.run(clientId);
+          console.log(`Deleted report feedback for client ${clientId}`);
+        } catch (feedbackError) {
+          console.error("Error deleting client feedback:", feedbackError);
+          // Continue with deletion even if feedback deletion fails
+        }
+        
+        // Next, delete any associated report templates
+        const deleteTemplatesStmt = db.connection.prepare(`
+          DELETE FROM report_templates WHERE client_id = ?
+        `);
+        
+        deleteTemplatesStmt.run(clientId);
+        
+        // Then delete the client
+        const deleteClientStmt = db.connection.prepare(`
+          DELETE FROM clients WHERE id = ?
+        `);
+        
+        deleteClientStmt.run(clientId);
+      } catch (sqliteError) {
+        console.error('DELETE /api/clients - SQLite delete error:', sqliteError);
+        return NextResponse.json(
+          { 
+            error: "Database error", 
+            message: "Failed to delete client from SQLite database",
+            details: sqliteError.message
+          },
+          { status: 500 }
+        );
+      }
     }
-    
-    // First, delete any associated report feedback
-    try {
-      const deleteFeedbackStmt = db.connection.prepare(`
-        DELETE FROM report_feedback WHERE client_id = ?
-      `);
-      
-      deleteFeedbackStmt.run(clientId);
-      console.log(`Deleted report feedback for client ${clientId}`);
-    } catch (feedbackError) {
-      console.error("Error deleting client feedback:", feedbackError);
-      // Continue with deletion even if feedback deletion fails
-    }
-    
-    // Next, delete any associated report templates
-    const deleteTemplatesStmt = db.connection.prepare(`
-      DELETE FROM report_templates WHERE client_id = ?
-    `);
-    
-    deleteTemplatesStmt.run(clientId);
-    
-    // Then delete the client
-    const deleteClientStmt = db.connection.prepare(`
-      DELETE FROM clients WHERE id = ?
-    `);
-    
-    deleteClientStmt.run(clientId);
     
     return NextResponse.json({ success: true });
   } catch (error) {
