@@ -7,7 +7,19 @@ import { NextResponse } from "next/server";
 export async function GET(request: Request) {
   // Extract the auth code from URL parameters or hash fragment if present
   const url = new URL(request.url);
-  const redirectTo = url.origin;
+  
+  // Determine the correct redirect URL based on the hostname
+  let redirectTo = url.origin;
+  
+  // If we're on the production site, ensure we use the correct origin
+  if (url.hostname === 'client-reports.onrender.com') {
+    redirectTo = 'https://client-reports.onrender.com';
+  } else if (url.hostname === 'localhost') {
+    // For local development, always use port 3000
+    redirectTo = 'http://localhost:3000';
+  }
+  
+  console.log('Callback detected on hostname:', url.hostname, 'redirecting to:', redirectTo);
   
   // Get authorization code and state from URL parameters
   const code = url.searchParams.get('code');
