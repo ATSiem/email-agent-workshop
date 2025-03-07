@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "~/lib/db";
 import { getUserAccessToken, setUserAccessToken } from "~/lib/auth/microsoft";
+import { headers } from "next/headers";
 
 // Schema for report template
 const templateSchema = z.object({
@@ -17,9 +18,27 @@ export async function GET(request: Request) {
     const authHeader = request.headers.get('Authorization');
     let accessToken = authHeader ? authHeader.replace('Bearer ', '') : null;
     
+    // Try to get token from header
     if (!accessToken) {
-      accessToken = getUserAccessToken();
+      // Check X-MS-TOKEN header (added by our client)
+      const msTokenHeader = request.headers.get('X-MS-TOKEN');
+      if (msTokenHeader) {
+        accessToken = msTokenHeader;
+      } else {
+        accessToken = getUserAccessToken();
+      }
     }
+    
+    // Check cookies as a last resort
+    if (!accessToken && request.headers.get('cookie')) {
+      const cookies = request.headers.get('cookie') || '';
+      const msGraphTokenMatch = cookies.match(/msGraphToken=([^;]+)/);
+      if (msGraphTokenMatch && msGraphTokenMatch[1]) {
+        accessToken = msGraphTokenMatch[1];
+      }
+    }
+    
+    console.log('Templates API - Token available:', !!accessToken);
     
     if (!accessToken) {
       return NextResponse.json(
@@ -96,9 +115,27 @@ export async function POST(request: Request) {
     const authHeader = request.headers.get('Authorization');
     let accessToken = authHeader ? authHeader.replace('Bearer ', '') : null;
     
+    // Try to get token from header
     if (!accessToken) {
-      accessToken = getUserAccessToken();
+      // Check X-MS-TOKEN header (added by our client)
+      const msTokenHeader = request.headers.get('X-MS-TOKEN');
+      if (msTokenHeader) {
+        accessToken = msTokenHeader;
+      } else {
+        accessToken = getUserAccessToken();
+      }
     }
+    
+    // Check cookies as a last resort
+    if (!accessToken && request.headers.get('cookie')) {
+      const cookies = request.headers.get('cookie') || '';
+      const msGraphTokenMatch = cookies.match(/msGraphToken=([^;]+)/);
+      if (msGraphTokenMatch && msGraphTokenMatch[1]) {
+        accessToken = msGraphTokenMatch[1];
+      }
+    }
+    
+    console.log('Templates API (POST) - Token available:', !!accessToken);
     
     if (!accessToken) {
       return NextResponse.json(
@@ -180,9 +217,27 @@ export async function PUT(request: Request) {
     const authHeader = request.headers.get('Authorization');
     let accessToken = authHeader ? authHeader.replace('Bearer ', '') : null;
     
+    // Try to get token from header
     if (!accessToken) {
-      accessToken = getUserAccessToken();
+      // Check X-MS-TOKEN header (added by our client)
+      const msTokenHeader = request.headers.get('X-MS-TOKEN');
+      if (msTokenHeader) {
+        accessToken = msTokenHeader;
+      } else {
+        accessToken = getUserAccessToken();
+      }
     }
+    
+    // Check cookies as a last resort
+    if (!accessToken && request.headers.get('cookie')) {
+      const cookies = request.headers.get('cookie') || '';
+      const msGraphTokenMatch = cookies.match(/msGraphToken=([^;]+)/);
+      if (msGraphTokenMatch && msGraphTokenMatch[1]) {
+        accessToken = msGraphTokenMatch[1];
+      }
+    }
+    
+    console.log('Templates API (PUT) - Token available:', !!accessToken);
     
     if (!accessToken) {
       return NextResponse.json(
@@ -284,9 +339,27 @@ export async function DELETE(request: Request) {
     const authHeader = request.headers.get('Authorization');
     let accessToken = authHeader ? authHeader.replace('Bearer ', '') : null;
     
+    // Try to get token from header
     if (!accessToken) {
-      accessToken = getUserAccessToken();
+      // Check X-MS-TOKEN header (added by our client)
+      const msTokenHeader = request.headers.get('X-MS-TOKEN');
+      if (msTokenHeader) {
+        accessToken = msTokenHeader;
+      } else {
+        accessToken = getUserAccessToken();
+      }
     }
+    
+    // Check cookies as a last resort
+    if (!accessToken && request.headers.get('cookie')) {
+      const cookies = request.headers.get('cookie') || '';
+      const msGraphTokenMatch = cookies.match(/msGraphToken=([^;]+)/);
+      if (msGraphTokenMatch && msGraphTokenMatch[1]) {
+        accessToken = msGraphTokenMatch[1];
+      }
+    }
+    
+    console.log('Templates API (DELETE) - Token available:', !!accessToken);
     
     if (!accessToken) {
       return NextResponse.json(
