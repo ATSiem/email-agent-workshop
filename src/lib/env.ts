@@ -24,10 +24,10 @@ const envSchema = z.object({
   NEXT_PUBLIC_AZURE_TENANT_ID: z.string(),
   NEXT_PUBLIC_AZURE_REDIRECT_URI: z.string(),
   
-  // Server-side Azure credentials 
-  AZURE_CLIENT_ID: z.string(),
-  AZURE_TENANT_ID: z.string(),
-  AZURE_REDIRECT_URI: z.string(),
+  // Server-side OAuth credentials 
+  CLIENT_ID: z.string(),
+  TENANT_ID: z.string(),
+  REDIRECT_URI: z.string(),
   
   // Domain restriction - comma-separated list of allowed email domains
   ALLOWED_EMAIL_DOMAINS: z.string().optional().transform(domains => 

@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 
 import { getCurrentModelSpec } from "~/lib/ai/model-info";
 import { env } from "~/lib/env";
+import { getUserEmail } from "~/lib/auth/microsoft";
 
 // Initialize OpenAI - make sure API key is set
 if (!process.env.OPENAI_API_KEY) {
@@ -161,14 +162,14 @@ export async function findSimilarEmails(query: string, options: {
     
     // Get user email for filtering
     const userEmail = await getUserEmail();
-    console.log(`EmailEmbeddings - User email for vector search: ${userEmail}`);
+    console.log(`EmailEmbeddings - User email for vector search: ${userEmail || 'not available'}`);
     
     // Build domain-based conditions
     let domainConditions = '';
     if (clientDomains.length > 0) {
       const domainFilters = clientDomains.map((domain) => {
         const sanitizedDomain = domain.replace(/'/g, "''");  // SQL escape single quotes
-        return `("from" LIKE '%@${sanitizedDomain}%' OR "from" LIKE '%@%.${sanitizedDomain}%' OR "to" LIKE '%@${sanitizedDomain}%' OR "to" LIKE '%@%.${sanitizedDomain}%'${hasCcBccColumns ? ` OR "cc" LIKE '%@${sanitizedDomain}%' OR "cc" LIKE '%@%.${sanitizedDomain}%' OR "bcc" LIKE '%@${sanitizedDomain}%' OR "bcc" LIKE '%@%.${sanitizedDomain}%'` : ''})`;
+        return `("from" LIKE '%@${sanitizedDomain}%' OR "from" LIKE '%@%.${sanitizedDomain}%' OR "to" LIKE '%@${sanitizedDomain}%' OR "to" LIKE '%@%.${sanitizedDomain}%')`;
       }).join(' OR ');
       
       if (domainFilters) {
@@ -176,31 +177,46 @@ export async function findSimilarEmails(query: string, options: {
       }
     }
     
-    // Build client email conditions with checks against both FROM and TO fields
-    const emailConditions = [];
-    
-    if (userEmail) {
-      const sanitizedUserEmail = userEmail.replace(/'/g, "''");  // SQL escape single quotes
-      
-      // Add conditions for each client email
-      clientEmails.forEach(clientEmail => {
-        const sanitizedClientEmail = clientEmail.replace(/'/g, "''");  // SQL escape single quotes
-        if (hasCcBccColumns) {
-          // User to client
-          emailConditions.push(`("from" = '${sanitizedUserEmail}' AND ("to" = '${sanitizedClientEmail}' OR "cc" LIKE '%${sanitizedClientEmail}%' OR "bcc" LIKE '%${sanitizedClientEmail}%'))`);
-          // Client to user
-          emailConditions.push(`("from" = '${sanitizedClientEmail}' AND ("to" = '${sanitizedUserEmail}' OR "cc" LIKE '%${sanitizedUserEmail}%' OR "bcc" LIKE '%${sanitizedUserEmail}%'))`);
-        } else {
-          // User to client
-          emailConditions.push(`("from" = '${sanitizedUserEmail}' AND "to" = '${sanitizedClientEmail}')`);
-          // Client to user
-          emailConditions.push(`("from" = '${sanitizedClientEmail}' AND "to" = '${sanitizedUserEmail}')`);
+    // Build client email conditions
+    let emailConditions = '';
+    if (clientEmails.length > 0) {
+      if (userEmail) {
+        const sanitizedUserEmail = userEmail.replace(/'/g, "''");  // SQL escape single quotes
+        
+        // Build conditions for user-client email interactions
+        const emailFilters = clientEmails.map((clientEmail) => {
+          const sanitizedClientEmail = clientEmail.replace(/'/g, "''");  // SQL escape single quotes
+          return `("from" = '${sanitizedUserEmail}' AND "to" = '${sanitizedClientEmail}') OR 
+                 ("from" = '${sanitizedClientEmail}' AND "to" = '${sanitizedUserEmail}')`;
+        }).join(' OR ');
+        
+        if (emailFilters) {
+          emailConditions = ` OR (${emailFilters})`;
         }
-      });
+      } else {
+        // If we don't have the user's email, just search for client emails
+        const emailFilters = clientEmails.map((email) => {
+          const sanitizedEmail = email.replace(/'/g, "''");  // SQL escape single quotes
+          return `("from" = '${sanitizedEmail}' OR "to" = '${sanitizedEmail}')`;
+        }).join(' OR ');
+        
+        if (emailFilters) {
+          emailConditions = ` OR (${emailFilters})`;
+        }
+      }
     }
     
-    // Combine all email conditions
-    const emailFilter = emailConditions.length > 0 ? `(${emailConditions.join(' OR ')})` : '1=1'; // Default condition that's always true
+    // Combine all conditions
+    let whereClause = '1=1'; // Default condition that's always true
+    
+    if (domainConditions || emailConditions) {
+      whereClause = `(${domainConditions}${emailConditions})`;
+    }
+    
+    // Add date range conditions
+    if (startDate && endDate) {
+      whereClause += ` AND (timestamp BETWEEN '${startDate}' AND '${endDate}')`;
+    }
     
     // Generate embedding for the query
     const queryEmbedding = await generateEmbeddingForQuery(query);
@@ -212,28 +228,13 @@ export async function findSimilarEmails(query: string, options: {
     // Convert embedding to string for SQL
     const queryEmbeddingStr = JSON.stringify(queryEmbedding);
     
-    // Build date conditions
-    const dateConditions = [];
-    if (startDate) {
-      const startDateStr = new Date(startDate).toISOString().split('T')[0];
-      dateConditions.push(`date >= '${startDateStr}'`);
-    }
-    if (endDate) {
-      const endDateStr = new Date(endDate).toISOString().split('T')[0];
-      dateConditions.push(`date <= '${endDateStr}'`);
-    }
-    
-    // Combine date conditions
-    const dateFilter = dateConditions.length > 0 ? `AND ${dateConditions.join(' AND ')}` : '';
-    
     // Build the SQL query for vector search
     const vectorSearchQuery = `
       SELECT id, subject, from, to, date, body, summary, 
         json_extract(embedding, '$') as embedding_json,
         (SELECT cosine_similarity(json_extract(embedding, '$'), json('${queryEmbeddingStr}'))) as similarity
       FROM messages
-      WHERE embedding IS NOT NULL ${dateFilter}
-        AND (${emailFilter}${domainConditions})
+      WHERE embedding IS NOT NULL ${whereClause}
       ORDER BY similarity DESC
       LIMIT ${limit}
     `;
@@ -285,32 +286,4 @@ async function generateEmbeddingForQuery(query: string) {
     console.error('EmailEmbeddings - Error generating embedding for query:', err);
     return null;
   }
-}
-
-/**
- * Calculate cosine similarity between two vectors
- */
-function calculateCosineSimilarity(vecA: number[], vecB: number[]) {
-  if (!vecA || !vecB || vecA.length === 0 || vecB.length === 0 || vecA.length !== vecB.length) {
-    return 0;
-  }
-  
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-  
-  for (let i = 0; i < vecA.length; i++) {
-    dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
-  }
-  
-  normA = Math.sqrt(normA);
-  normB = Math.sqrt(normB);
-  
-  if (normA === 0 || normB === 0) {
-    return 0;
-  }
-  
-  return dotProduct / (normA * normB);
 }

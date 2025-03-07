@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '~/components/auth-provider';
 import { LoginButton } from '~/components/login-button';
 import { ClientForm } from './components/client-form';
@@ -16,11 +16,29 @@ export function ClientPage() {
   
   const { isAuthenticated, isLoading: authLoading, user, logout } = useAuth();
 
+  // Add event listener for navigation from client list
+  useEffect(() => {
+    const handleNavigateToGenerate = (event) => {
+      const { clientId } = event.detail;
+      setSelectedClientId(clientId);
+      setActiveView('generate');
+    };
+
+    window.addEventListener('navigate-to-generate', handleNavigateToGenerate);
+    
+    return () => {
+      window.removeEventListener('navigate-to-generate', handleNavigateToGenerate);
+    };
+  }, []);
+
   return (
     <div className="mx-auto mt-10 max-w-screen-lg">
       <div className="mb-6 flex justify-between items-center">
         <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold">Client Reports</h1>
+          <h1 className="text-2xl font-bold">
+            <span className="mr-2" role="img" aria-label="document">📊</span>
+            Client Reports
+          </h1>
         </div>
         <div className="flex items-center gap-4">
           {/* Dark mode toggle */}

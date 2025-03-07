@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useImperativeHandle, forwardRef, useRef, useCallback } from 'react';
 import { getUserAccessToken } from '~/lib/auth/microsoft';
+import Link from 'next/link';
 
 interface Client {
   id: string;
@@ -11,179 +12,207 @@ interface Client {
 }
 
 interface ClientListProps {
-  onSelectClient: (clientId: string) => void;
   id?: string;
+  onSelectClient: (clientId: string) => void;
 }
 
-export function ClientList({ onSelectClient, id }: ClientListProps) {
-  // Add a ref to expose methods to the parent
-  const ref = useRef<HTMLDivElement>(null);
-  
-  const [clients, setClients] = useState<Client[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState('');
-  
-  // Define fetchClients with useCallback to avoid recreating on every render
-  const fetchClients = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      setError('');
-      
-      // Get the authentication token
-      const token = getUserAccessToken();
-      console.log('ClientList - Access token available:', !!token);
-      
-      if (!token) {
-        throw new Error('Authentication required. Please sign in again.');
-      }
-      
-      console.log('ClientList - Fetching clients');
-      const response = await fetch('/api/clients', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Cache-Control': 'no-cache'
-        },
-        cache: 'no-cache'
-      });
-      console.log('ClientList - Response status:', response.status);
-      
-      const data = await response.json();
-      console.log('ClientList - Response data:', data);
-      
-      if (!response.ok) {
-        throw new Error(data.message || data.error || 'Failed to fetch clients');
-      }
-      
-      setClients(data.clients || []);
-    } catch (err) {
-      console.error('ClientList - Error fetching clients:', err);
-      setError(err.message || 'An error occurred');
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-  
-  // Fetch clients on component mount
-  useEffect(() => {
-    fetchClients();
-  }, [fetchClients]);
-  
-  // Expose the refresh method through DOM for parent access
-  useEffect(() => {
-    if (ref.current && id) {
-      // Add refreshClients method to the DOM element
-      (ref.current as any).refreshClients = fetchClients;
-    }
-  }, [id, fetchClients]);
-  
-  async function handleDeleteClient(clientId: string) {
-    if (!confirm('Are you sure you want to delete this client? This will also delete any associated templates.')) {
-      return;
-    }
+export const ClientList = forwardRef<{ refreshClients: () => Promise<void> }, ClientListProps>(
+  function ClientList({ id, onSelectClient }, ref) {
+    const [clients, setClients] = useState<Client[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [authError, setAuthError] = useState(false);
     
-    try {
-      // Get the authentication token
-      const token = getUserAccessToken();
-      console.log('ClientList - Access token available for delete:', !!token);
+    // Function to fetch clients
+    const fetchClients = useCallback(async () => {
+      setLoading(true);
+      setError(null);
+      setAuthError(false);
       
-      if (!token) {
-        throw new Error('Authentication required. Please sign in again.');
+      try {
+        console.log('ClientList - Fetching clients');
+        
+        // Get the authentication token
+        const token = getUserAccessToken();
+        console.log('ClientList - Access token available:', !!token);
+        
+        if (!token) {
+          setAuthError(true);
+          throw new Error('Authentication required. Please sign in again.');
+        }
+        
+        // Get user email from session storage for debugging
+        const userEmail = typeof window !== 'undefined' ? sessionStorage.getItem('userEmail') : null;
+        if (userEmail) {
+          console.log('Adding user email to API request:', userEmail);
+        }
+        
+        // Fetch clients from API
+        const response = await fetch('/api/clients', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            ...(userEmail ? { 'X-User-Email': userEmail } : {})
+          }
+        });
+        
+        console.log('ClientList - Response status:', response.status);
+        
+        if (response.status === 401) {
+          setAuthError(true);
+          throw new Error('Authentication required. Please sign in again.');
+        }
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error('ClientList - Error response:', errorData);
+          throw new Error(errorData.error || 'Failed to fetch clients');
+        }
+        
+        const data = await response.json();
+        console.log('ClientList - Response data:', data);
+        
+        setClients(data.clients || []);
+      } catch (err) {
+        console.error('ClientList - Error fetching clients:', err);
+        setError(err.message || 'An error occurred while fetching clients');
+      } finally {
+        setLoading(false);
       }
-      
-      const response = await fetch(`/api/clients?id=${clientId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Cache-Control': 'no-cache'
-        },
-        cache: 'no-cache'
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to delete client');
-      }
-      
-      // Refresh client list
+    }, []);
+    
+    // Expose refreshClients method to parent components
+    useImperativeHandle(ref, () => ({
+      refreshClients: fetchClients
+    }));
+    
+    // Fetch clients on mount
+    useEffect(() => {
       fetchClients();
-    } catch (err) {
-      console.error('ClientList - Error deleting client:', err);
-      setError(err.message || 'An error occurred');
-    }
-  }
-  
-  if (isLoading) {
+    }, [fetchClients]);
+    
+    // Handle client selection
+    const handleSelectClient = (clientId: string) => {
+      onSelectClient(clientId);
+    };
+    
+    // Handle client deletion
+    const handleDeleteClient = async (clientId: string) => {
+      if (!window.confirm('Are you sure you want to delete this client?')) {
+        return;
+      }
+      
+      try {
+        const token = getUserAccessToken();
+        if (!token) {
+          setAuthError(true);
+          throw new Error('Authentication required. Please sign in again.');
+        }
+        
+        const response = await fetch(`/api/clients/${clientId}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to delete client');
+        }
+        
+        // Refresh the client list after deletion
+        fetchClients();
+      } catch (err) {
+        console.error('Error deleting client:', err);
+        setError(err.message || 'An error occurred while deleting the client');
+      }
+    };
+    
     return (
-      <div ref={ref} id={id} className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-        <h2 className="text-lg font-medium mb-4 dark:text-white">Your Clients</h2>
-        <div className="py-4 text-center text-gray-500 dark:text-gray-400">
-          Loading clients...
+      <div id={id} className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-medium dark:text-white">Your Clients</h2>
+          <button
+            onClick={fetchClients}
+            className="text-sm text-blue-600 hover:text-blue-500 dark:text-blue-400"
+            disabled={loading}
+          >
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </button>
         </div>
+        
+        {authError && (
+          <div className="mb-4 p-4 bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 rounded-md">
+            <p className="font-medium">Authentication Required</p>
+            <p className="text-sm mt-1">Your session may have expired. Please <Link href="/" className="underline">sign in again</Link> to continue.</p>
+          </div>
+        )}
+        
+        {error && !authError && (
+          <div className="mb-4 p-3 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 rounded-md text-sm">
+            {error}
+          </div>
+        )}
+        
+        {loading ? (
+          <div className="py-8 flex justify-center">
+            <div className="animate-pulse text-gray-500 dark:text-gray-400">Loading clients...</div>
+          </div>
+        ) : clients.length === 0 ? (
+          <div className="py-8 text-center text-gray-500 dark:text-gray-400">
+            <p>No clients found.</p>
+            <p className="text-sm mt-2">Add your first client using the form.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-200 dark:divide-gray-700">
+            {clients.map((client) => (
+              <div key={client.id} className="py-3">
+                <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-3">
+                  <div className="flex-grow max-w-full md:max-w-[70%]">
+                    <h3 className="font-medium dark:text-white">{client.name}</h3>
+                    <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      {client.domains && client.domains.length > 0 && (
+                        <div className="mb-1">
+                          <span className="font-medium">Domains:</span> {client.domains.join(', ')}
+                        </div>
+                      )}
+                      {client.emails && client.emails.length > 0 && (
+                        <div className="break-words">
+                          <span className="font-medium">Emails:</span> {client.emails.join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex space-x-3 self-end md:self-start shrink-0">
+                    <button
+                      onClick={() => {
+                        handleSelectClient(client.id);
+                        // Navigate directly to generate report view
+                        window.dispatchEvent(new CustomEvent('navigate-to-generate', { detail: { clientId: client.id } }));
+                      }}
+                      className="relative px-4 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-green-500 to-emerald-600 rounded-md shadow-sm overflow-hidden group min-w-[130px] text-center"
+                    >
+                      <span className="relative z-10">Generate Report</span>
+                      <div className="absolute inset-0 bg-gradient-to-r from-green-400 to-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                      <div className="absolute inset-0 border-0 group-hover:border group-hover:border-white group-hover:border-opacity-30 rounded-md transition-all duration-300"></div>
+                      <div className="absolute inset-0 -translate-y-full group-hover:translate-y-0 bg-gradient-to-r from-green-300/20 to-emerald-400/20 transition-transform duration-500"></div>
+                    </button>
+                    <button
+                      onClick={() => handleDeleteClient(client.id)}
+                      className="relative px-4 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-red-500 to-rose-600 rounded-md shadow-sm overflow-hidden group min-w-[80px] text-center"
+                    >
+                      <span className="relative z-10">Delete</span>
+                      <div className="absolute inset-0 bg-gradient-to-r from-red-400 to-rose-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                      <div className="absolute inset-0 border-0 group-hover:border group-hover:border-white group-hover:border-opacity-30 rounded-md transition-all duration-300"></div>
+                      <div className="absolute inset-0 -translate-y-full group-hover:translate-y-0 bg-gradient-to-r from-red-300/20 to-rose-400/20 transition-transform duration-500"></div>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
-  
-  return (
-    <div ref={ref} id={id} className="bg-white dark:bg-gray-800 rounded-lg shadow">
-      <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-        <h2 className="text-lg font-medium dark:text-white">Your Clients</h2>
-      </div>
-      
-      {error && (
-        <div className="p-4 m-4 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 rounded-md text-sm">
-          {error}
-        </div>
-      )}
-      
-      {clients.length === 0 ? (
-        <div className="p-6 text-center text-gray-500 dark:text-gray-400">
-          No clients found. Add your first client to get started.
-        </div>
-      ) : (
-        <ul className="divide-y divide-gray-200 dark:divide-gray-700">
-          {clients.map((client) => (
-            <li key={client.id} className="p-6 hover:bg-gray-50 dark:hover:bg-gray-700">
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <h3 className="font-medium text-gray-900 dark:text-white">{client.name}</h3>
-                  
-                  {client.domains.length > 0 && (
-                    <div className="mt-1">
-                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Domains: </span>
-                      <span className="text-sm text-gray-700 dark:text-gray-300">
-                        {client.domains.join(', ')}
-                      </span>
-                    </div>
-                  )}
-                  
-                  {client.emails.length > 0 && (
-                    <div className="mt-1">
-                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Emails: </span>
-                      <span className="text-sm text-gray-700 dark:text-gray-300">
-                        {client.emails.join(', ')}
-                      </span>
-                    </div>
-                  )}
-                </div>
-                
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => onSelectClient(client.id)}
-                    className="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded-md hover:bg-blue-100 dark:bg-blue-900 dark:text-blue-300 dark:hover:bg-blue-800"
-                  >
-                    Generate Report
-                  </button>
-                  <button
-                    onClick={() => handleDeleteClient(client.id)}
-                    className="text-sm bg-red-50 text-red-600 px-3 py-1 rounded-md hover:bg-red-100 dark:bg-red-900 dark:text-red-300 dark:hover:bg-red-800"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
+);

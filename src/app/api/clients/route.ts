@@ -46,46 +46,60 @@ export async function GET(request: Request) {
     // Log database operations
     console.log('Clients API - Database operations starting');
     
-    if (clientId) {
-      console.log('Clients API - Fetching single client:', clientId);
-      // Fetch a single client
-      const stmt = db.connection.prepare(`
-        SELECT * FROM clients WHERE id = ?
-      `);
+    try {
+      if (clientId) {
+        console.log('Clients API - Fetching single client:', clientId);
+        // Fetch a single client
+        const stmt = db.connection.prepare(`
+          SELECT * FROM clients WHERE id = ?
+        `);
+        
+        const client = stmt.get(clientId);
+        
+        if (!client) {
+          console.log('Clients API - Client not found');
+          return NextResponse.json({ error: "Client not found" }, { status: 404 });
+        }
+        
+        console.log('Clients API - Client found, returning data');
+        // Parse JSON strings back to arrays
+        return NextResponse.json({
+          ...client,
+          domains: JSON.parse(client.domains),
+          emails: JSON.parse(client.emails),
+        });
+      } else {
+        console.log('Clients API - Fetching all clients');
+        // Fetch all clients
+        const stmt = db.connection.prepare(`
+          SELECT * FROM clients ORDER BY name ASC
+        `);
+        
+        const clients = stmt.all();
+        console.log('Clients API - Found', clients.length, 'clients');
+        
+        // Parse JSON strings back to arrays for each client
+        const formattedClients = clients.map(client => ({
+          ...client,
+          domains: JSON.parse(client.domains),
+          emails: JSON.parse(client.emails),
+        }));
+        
+        console.log('Clients API - Returning formatted clients');
+        return NextResponse.json({ clients: formattedClients });
+      }
+    } catch (dbError) {
+      console.error("Database error:", dbError);
       
-      const client = stmt.get(clientId);
-      
-      if (!client) {
-        console.log('Clients API - Client not found');
-        return NextResponse.json({ error: "Client not found" }, { status: 404 });
+      // For new users, return an empty clients array instead of an error
+      // This prevents showing "Failed to fetch clients" for new users
+      if (!clientId) {
+        console.log('Clients API - Database error but returning empty clients array for better UX');
+        return NextResponse.json({ clients: [] });
       }
       
-      console.log('Clients API - Client found, returning data');
-      // Parse JSON strings back to arrays
-      return NextResponse.json({
-        ...client,
-        domains: JSON.parse(client.domains),
-        emails: JSON.parse(client.emails),
-      });
-    } else {
-      console.log('Clients API - Fetching all clients');
-      // Fetch all clients
-      const stmt = db.connection.prepare(`
-        SELECT * FROM clients ORDER BY name ASC
-      `);
-      
-      const clients = stmt.all();
-      console.log('Clients API - Found', clients.length, 'clients');
-      
-      // Parse JSON strings back to arrays for each client
-      const formattedClients = clients.map(client => ({
-        ...client,
-        domains: JSON.parse(client.domains),
-        emails: JSON.parse(client.emails),
-      }));
-      
-      console.log('Clients API - Returning formatted clients');
-      return NextResponse.json({ clients: formattedClients });
+      // For specific client requests, we still need to return an error
+      throw dbError;
     }
   } catch (error) {
     console.error("Error fetching clients:", error);
@@ -102,15 +116,33 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    console.log('POST /api/clients - Request received');
+    
     // Authentication check
     const authHeader = request.headers.get('Authorization');
     let accessToken = authHeader ? authHeader.replace('Bearer ', '') : null;
     
+    console.log('POST /api/clients - Auth header present:', !!authHeader);
+    
+    // Log all headers for debugging (excluding Authorization token)
+    const headers = {};
+    request.headers.forEach((value, key) => {
+      if (key.toLowerCase() === 'authorization') {
+        headers[key] = 'Bearer [redacted]';
+      } else {
+        headers[key] = value;
+      }
+    });
+    console.log('POST /api/clients - Request headers:', JSON.stringify(headers, null, 2));
+    
     if (!accessToken) {
+      console.log('POST /api/clients - No auth header, trying getUserAccessToken()');
       accessToken = getUserAccessToken();
+      console.log('POST /api/clients - Token from getUserAccessToken:', accessToken ? 'present' : 'missing');
     }
     
     if (!accessToken) {
+      console.log('POST /api/clients - No token found, returning 401');
       return NextResponse.json(
         { 
           error: "Authentication required",
@@ -121,46 +153,124 @@ export async function POST(request: Request) {
     }
     
     // Set the token for Graph API calls that might happen later
+    console.log('POST /api/clients - Setting user access token');
     setUserAccessToken(accessToken);
     
     // Parse and validate the request body
-    const body = await request.json();
-    const data = clientSchema.parse(body);
+    console.log('POST /api/clients - Parsing request body');
+    let body;
+    try {
+      body = await request.json();
+      console.log('POST /api/clients - Request body:', JSON.stringify(body, null, 2));
+    } catch (parseError) {
+      console.error('POST /api/clients - Failed to parse request body:', parseError);
+      return NextResponse.json(
+        { 
+          error: "Invalid request format", 
+          message: "Could not parse request body as JSON",
+          details: parseError.message
+        },
+        { status: 400 }
+      );
+    }
     
-    // Generate a new client ID
-    const clientId = crypto.randomUUID();
-    
-    // Insert the new client
-    const stmt = db.connection.prepare(`
-      INSERT INTO clients (id, name, domains, emails, created_at, updated_at)
-      VALUES (?, ?, ?, ?, unixepoch(), unixepoch())
-    `);
-    
-    stmt.run(
-      clientId,
-      data.name,
-      JSON.stringify(data.domains),
-      JSON.stringify(data.emails)
-    );
-    
-    return NextResponse.json({
-      id: clientId,
-      name: data.name,
-      domains: data.domains,
-      emails: data.emails,
-    }, { status: 201 });
+    try {
+      console.log('POST /api/clients - Validating with Zod schema');
+      const data = clientSchema.parse(body);
+      console.log('POST /api/clients - Validation successful');
+      
+      // Generate a new client ID
+      const clientId = crypto.randomUUID();
+      console.log('POST /api/clients - Generated client ID:', clientId);
+      
+      // Insert the new client
+      console.log('POST /api/clients - Preparing database insert');
+      let stmt;
+      try {
+        stmt = db.connection.prepare(`
+          INSERT INTO clients (id, name, domains, emails, created_at, updated_at)
+          VALUES (?, ?, ?, ?, unixepoch(), unixepoch())
+        `);
+      } catch (prepareError) {
+        console.error('POST /api/clients - Failed to prepare SQL statement:', prepareError);
+        return NextResponse.json(
+          { 
+            error: "Database error", 
+            message: "Failed to prepare database statement",
+            details: prepareError.message
+          },
+          { status: 500 }
+        );
+      }
+      
+      console.log('POST /api/clients - Executing database insert with values:', {
+        id: clientId,
+        name: data.name,
+        domains: JSON.stringify(data.domains),
+        emails: JSON.stringify(data.emails)
+      });
+      
+      try {
+        stmt.run(
+          clientId,
+          data.name,
+          JSON.stringify(data.domains),
+          JSON.stringify(data.emails)
+        );
+        console.log('POST /api/clients - Database insert successful');
+      } catch (dbError) {
+        console.error('POST /api/clients - Database insert error:', dbError);
+        return NextResponse.json(
+          { 
+            error: "Database error", 
+            message: "Failed to insert client into database",
+            details: dbError.message
+          },
+          { status: 500 }
+        );
+      }
+      
+      console.log('POST /api/clients - Returning success response');
+      return NextResponse.json({
+        id: clientId,
+        name: data.name,
+        domains: data.domains,
+        emails: data.emails,
+      }, { status: 201 });
+    } catch (validationError) {
+      console.error('POST /api/clients - Validation error:', validationError);
+      if (validationError instanceof z.ZodError) {
+        return NextResponse.json(
+          { 
+            error: "Validation error", 
+            message: "The provided data did not pass validation",
+            details: validationError.format() 
+          },
+          { status: 400 }
+        );
+      }
+      throw validationError;
+    }
   } catch (error) {
     console.error("Error creating client:", error);
     
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { error: "Validation error", details: error.format() },
+        { 
+          error: "Validation error", 
+          message: "The provided data did not pass validation",
+          details: error.format() 
+        },
         { status: 400 }
       );
     }
     
     return NextResponse.json(
-      { error: "Failed to create client" },
+      { 
+        error: "Failed to create client", 
+        message: error.message || "Unknown error",
+        stack: process.env.NODE_ENV !== 'production' ? error.stack : undefined
+      },
       { status: 500 }
     );
   }
@@ -275,9 +385,21 @@ export async function DELETE(request: Request) {
     // Set the token for Graph API calls that might happen later
     setUserAccessToken(accessToken);
     
-    // Get client ID from URL
+    // Get client ID from URL or path
     const url = new URL(request.url);
-    const clientId = url.searchParams.get('id');
+    
+    // Try to get client ID from query parameter
+    let clientId = url.searchParams.get('id');
+    
+    // If not found in query, try to extract from path
+    if (!clientId) {
+      const pathParts = url.pathname.split('/');
+      // The last part of the path should be the client ID
+      const potentialId = pathParts[pathParts.length - 1];
+      if (potentialId && potentialId !== 'clients') {
+        clientId = potentialId;
+      }
+    }
     
     if (!clientId) {
       return NextResponse.json(

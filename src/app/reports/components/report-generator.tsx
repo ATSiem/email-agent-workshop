@@ -246,47 +246,69 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
   async function handleGenerateReport(e: React.FormEvent) {
     e.preventDefault();
     
-    if (!selectedClientId) {
-      setError('Please select a client');
-      return;
-    }
-    
-    setIsGenerating(true);
-    setError(null);
-    setGeneratedReport(null);
-    setReportId('');
-    setGenerationTimeMs(0);
-    setClipboardCopied(false);
-    
-    // Generate a unique ID for this report generation
-    const newReportId = crypto.randomUUID();
-    setReportId(newReportId);
-    
-    const startTime = performance.now();
-    
     try {
+      setIsGenerating(true);
+      setGeneratedReport('');
+      setReportHighlights([]);
+      setError('');
+      setEmailCount(0);
+      setFromGraphApi(false);
+      setShowFeedback(false);
+      
+      if (!selectedClientId) {
+        throw new Error('Please select a client');
+      }
+      
+      if (!startDate || !endDate) {
+        throw new Error('Please select a date range');
+      }
+      
       // Get the authentication token
       const token = getUserAccessToken();
+      console.log('ReportGenerator - Access token available:', !!token);
       
       if (!token) {
         throw new Error('Authentication required. Please sign in again.');
       }
       
+      // Create a unique ID for this report
+      const newReportId = crypto.randomUUID();
+      
+      // Record the start time for performance tracking
+      const startTime = performance.now();
+      
+      console.log('ReportGenerator - Sending request to generate report');
+      console.log('ReportGenerator - Request parameters:', {
+        startDate,
+        endDate,
+        format: format,
+        clientId: selectedClientId,
+        saveName,
+        examplePrompt,
+        searchQuery,
+        useVectorSearch,
+        reportId: newReportId,
+      });
+      
+      // Get user email from session storage for debugging
+      const userEmail = typeof window !== 'undefined' ? sessionStorage.getItem('userEmail') : null;
+      
       const response = await fetch('/api/summarize', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          ...(userEmail ? { 'X-User-Email': userEmail } : {})
         },
         body: JSON.stringify({
-          startDate: new Date(startDate).toISOString(),
-          endDate: new Date(endDate + 'T23:59:59').toISOString(),
+          startDate,
+          endDate,
           format: format,
           clientId: selectedClientId,
-          saveName: saveName || "",
-          examplePrompt: examplePrompt || "",
-          searchQuery: searchQuery.trim(),
-          useVectorSearch: useVectorSearch,
+          saveName,
+          examplePrompt,
+          searchQuery,
+          useVectorSearch,
           reportId: newReportId,
         }),
       });
@@ -295,13 +317,43 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
       const totalTime = Math.round(endTime - startTime);
       setGenerationTimeMs(totalTime);
       
-      const data = await response.json();
       console.log('ReportGenerator - Response received with status:', response.status);
+      
+      // Handle 404 specifically (no emails found)
+      if (response.status === 404) {
+        throw new Error('No emails found for the selected client and date range.');
+      }
+      
+      // Handle 401 specifically (authentication issues)
+      if (response.status === 401) {
+        throw new Error('Authentication required. Please sign in again.');
+      }
+      
+      let data;
+      try {
+        const responseText = await response.text();
+        try {
+          data = JSON.parse(responseText);
+          console.log('ReportGenerator - Response data:', data);
+        } catch (parseError) {
+          console.error('ReportGenerator - Failed to parse response as JSON:', responseText);
+          throw new Error('Invalid response format from server');
+        }
+      } catch (responseError) {
+        console.error('ReportGenerator - Error reading response:', responseError);
+        throw new Error('Failed to read response from server');
+      }
       
       if (!response.ok) {
         console.error('ReportGenerator - Error response:', data);
-        throw new Error(data.error || data.message || 'Failed to generate report');
+        throw new Error(data?.error || data?.message || `Failed to generate report (${response.status})`);
       }
+      
+      if (!data || !data.report) {
+        console.error('ReportGenerator - Missing report data in response');
+        throw new Error('Server returned an empty report');
+      }
+      
       console.log('ReportGenerator - Generated report data:', data);
       setGeneratedReport(data.report);
       setReportHighlights(data.highlights || []);
@@ -320,12 +372,13 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
         setShowFeedback(true);
       }, 10000);
       
+      // Notify parent component if callback provided
       if (onReportGenerated) {
         onReportGenerated();
       }
     } catch (err) {
       console.error('ReportGenerator - Error generating report:', err);
-      setError(err.message || 'An error occurred');
+      setError(err.message || 'An error occurred while generating the report');
     } finally {
       setIsGenerating(false);
     }
@@ -372,9 +425,12 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
           <div className="flex justify-between">
             <button
               onClick={() => setGeneratedReport(null)}
-              className="px-4 py-2 bg-gray-100 text-gray-800 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+              className="relative px-4 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-indigo-600 rounded-md shadow-sm overflow-hidden group"
             >
-              Generate Another Report
+              <span className="relative z-10">Generate Another Report</span>
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+              <div className="absolute inset-0 border-0 group-hover:border group-hover:border-white group-hover:border-opacity-30 rounded-md transition-all duration-300"></div>
+              <div className="absolute inset-0 -translate-y-full group-hover:translate-y-0 bg-gradient-to-r from-blue-300/20 to-indigo-400/20 transition-transform duration-500"></div>
             </button>
             
             <button
@@ -400,9 +456,12 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
                 
                 alert('Report copied to clipboard');
               }}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:bg-blue-500 dark:hover:bg-blue-600"
+              className="relative px-4 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-green-500 to-emerald-600 rounded-md shadow-sm overflow-hidden group"
             >
-              Copy to Clipboard
+              <span className="relative z-10">Copy to Clipboard</span>
+              <div className="absolute inset-0 bg-gradient-to-r from-green-400 to-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+              <div className="absolute inset-0 border-0 group-hover:border group-hover:border-white group-hover:border-opacity-30 rounded-md transition-all duration-300"></div>
+              <div className="absolute inset-0 -translate-y-full group-hover:translate-y-0 bg-gradient-to-r from-green-300/20 to-emerald-400/20 transition-transform duration-500"></div>
             </button>
           </div>
         </div>
@@ -592,9 +651,12 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
             <button
               type="submit"
               disabled={isGenerating}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-600"
+              className="relative px-4 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-indigo-600 rounded-md shadow-sm overflow-hidden group disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isGenerating ? 'Processing emails & generating report...' : 'Generate Report'}
+              <span className="relative z-10">{isGenerating ? 'Processing emails & generating report...' : 'Generate Report'}</span>
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300 disabled:opacity-0"></div>
+              <div className="absolute inset-0 border-0 group-hover:border group-hover:border-white group-hover:border-opacity-30 rounded-md transition-all duration-300"></div>
+              <div className="absolute inset-0 -translate-y-full group-hover:translate-y-0 bg-gradient-to-r from-blue-300/20 to-indigo-400/20 transition-transform duration-500"></div>
             </button>
           </div>
         </form>

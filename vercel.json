@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "framework": "nextjs",
+  "buildCommand": "./vercel-build.sh",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "outputDirectory": ".next",
+  "functions": {
+    "app/api/**/*": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
+  },
+  "env": {
+    "USE_DYNAMIC_MODEL_LIMITS": "false",
+    "NEXT_PUBLIC_DISABLE_VECTOR_SEARCH": "true"
+  },
+  "git": {
+    "deploymentEnabled": {
+      "main": true
+    }
+  }
+} 

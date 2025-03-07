@@ -1,5 +1,5 @@
 import { db } from "~/lib/db";
-import { getGraphClient } from "~/lib/auth/microsoft";
+import { getGraphClient, getUserEmail } from "~/lib/auth/microsoft";
 import { findSimilarEmails } from "./email-embeddings";
 import { queueBackgroundTask } from "./background-processor";
 
@@ -159,24 +159,13 @@ export async function getClientEmails(params: EmailParams) {
 
 // Function to get client emails from database using SQL
 async function getClientEmailsFromDatabase(params: EmailParams) {
+  const { startDate, endDate, clientDomains = [], clientEmails = [], maxResults = 1000, searchQuery = '', useVectorSearch = false } = params;
+  
   try {
-    const { 
-      startDate, 
-      endDate, 
-      clientDomains = [], 
-      clientEmails = [], 
-      maxResults = 1000,
-      searchQuery = ""  // Add support for standard keyword search
-    } = params;
-    
     console.log('EmailFetcher - Fetching from database with date range:');
     console.log(`  - Start date: ${startDate}`);
     console.log(`  - End date: ${endDate}`);
-    if (searchQuery) {
-      console.log(`  - Search query: "${searchQuery}"`);
-    }
     
-    // First, get the user's own email
     // For the database, we need to get it from the Graph API first
     let userEmail = '';
     try {
@@ -191,12 +180,27 @@ async function getClientEmailsFromDatabase(params: EmailParams) {
       // Continue with empty userEmail - will fall back to old behavior
     }
     
-    // Check if cc and bcc columns exist in the database
-    const columnInfo = await db.connection.get('PRAGMA table_info(messages)');
-    const hasCcBccColumns = columnInfo.some((column: any) => column.name === 'cc') && 
-                           columnInfo.some((column: any) => column.name === 'bcc');
+    // Check if the database connection is properly initialized
+    if (!db.connection) {
+      console.error('EmailFetcher - Database connection not initialized');
+      return { emails: [], fromGraphApi: false };
+    }
     
-    console.log(`EmailFetcher - Database has cc/bcc columns: ${hasCcBccColumns}`);
+    // Check if cc and bcc columns exist in the database using prepare/all instead of get
+    let hasCcBccColumns = false;
+    try {
+      const stmt = db.connection.prepare('PRAGMA table_info(messages)');
+      const columnInfo = stmt.all();
+      
+      hasCcBccColumns = columnInfo.some((column: any) => column.name === 'cc') && 
+                        columnInfo.some((column: any) => column.name === 'bcc');
+      
+      console.log(`EmailFetcher - Database has cc/bcc columns: ${hasCcBccColumns}`);
+    } catch (error) {
+      console.error('EmailFetcher - Error checking database columns:', error);
+      // Continue without cc/bcc columns
+      hasCcBccColumns = false;
+    }
     
     // If columns don't exist, log a warning but continue
     if (!hasCcBccColumns) {
@@ -241,6 +245,19 @@ async function getClientEmailsFromDatabase(params: EmailParams) {
           emailConditions.push(`("from" = '${sanitizedUserEmail}' AND "to" = '${sanitizedClientEmail}')`);
           // Client to user
           emailConditions.push(`("from" = '${sanitizedClientEmail}' AND "to" = '${sanitizedUserEmail}')`);
+        }
+      });
+    } else {
+      // If we can't get the user's email, just search for client emails in general
+      console.log('EmailFetcher - No user email available, searching for client emails only');
+      
+      // Add conditions for each client email
+      clientEmails.forEach(clientEmail => {
+        const sanitizedClientEmail = clientEmail.replace(/'/g, "''");  // SQL escape single quotes
+        if (hasCcBccColumns) {
+          emailConditions.push(`("from" = '${sanitizedClientEmail}' OR "to" = '${sanitizedClientEmail}' OR "cc" LIKE '%${sanitizedClientEmail}%' OR "bcc" LIKE '%${sanitizedClientEmail}%')`);
+        } else {
+          emailConditions.push(`("from" = '${sanitizedClientEmail}' OR "to" = '${sanitizedClientEmail}')`);
         }
       });
     }

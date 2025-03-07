@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { getUserAccessToken } from '~/lib/auth/microsoft';
+import Link from 'next/link';
 
 interface ClientFormProps {
   onClientAdded: () => void;
@@ -13,13 +14,18 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
   const [emails, setEmails] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [debugInfo, setDebugInfo] = useState<string | null>(null);
+  const [authError, setAuthError] = useState(false);
   
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
+    setDebugInfo(null);
+    setAuthError(false);
     
     try {
       setIsSubmitting(true);
+      console.log('Client form submission started');
       
       // Validate inputs
       if (!name.trim()) {
@@ -34,6 +40,8 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
       const emailList = emails.split(',')
         .map(e => e.trim().toLowerCase())
         .filter(e => e.length > 0);
+      
+      console.log('Parsed inputs:', { name, domainList, emailList });
       
       // Validate at least one domain or email
       if (domainList.length === 0 && emailList.length === 0) {
@@ -50,38 +58,91 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
       
       // Get the authentication token
       const token = getUserAccessToken();
+      console.log('Auth token retrieved:', token ? 'Present (not showing for security)' : 'Missing');
+      
       if (!token) {
+        setAuthError(true);
         throw new Error('Authentication required. Please sign in again.');
       }
       
       // Create the client
-      const response = await fetch('/api/clients', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          name,
-          domains: domainList,
-          emails: emailList,
-        }),
-      });
+      console.log('Sending API request to create client');
       
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to create client');
+      // Prepare request data
+      const requestData = {
+        name,
+        domains: domainList,
+        emails: emailList,
+      };
+      
+      console.log('Request data:', JSON.stringify(requestData));
+      
+      try {
+        // Get user email from session storage for debugging
+        const userEmail = typeof window !== 'undefined' ? sessionStorage.getItem('userEmail') : null;
+        
+        const response = await fetch('/api/clients', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            ...(userEmail ? { 'X-User-Email': userEmail } : {})
+          },
+          body: JSON.stringify(requestData),
+        });
+        
+        console.log('API response status:', response.status);
+        
+        if (response.status === 401) {
+          setAuthError(true);
+          throw new Error('Authentication required. Please sign in again.');
+        }
+        
+        let responseData;
+        const responseText = await response.text();
+        
+        try {
+          // Try to parse the response as JSON
+          responseData = JSON.parse(responseText);
+          console.log('Response data:', responseData);
+        } catch (parseError) {
+          console.error('Failed to parse response as JSON:', responseText);
+          setDebugInfo(`Response was not valid JSON: ${responseText}`);
+          responseData = { error: 'Invalid response format' };
+        }
+        
+        if (!response.ok) {
+          console.error('API error response:', responseData);
+          
+          // Collect detailed error information
+          const errorDetails = [
+            `Status: ${response.status}`,
+            `Error: ${responseData.error || 'Unknown error'}`,
+            `Message: ${responseData.message || 'No message provided'}`,
+            responseData.details ? `Details: ${JSON.stringify(responseData.details)}` : ''
+          ].filter(Boolean).join('\n');
+          
+          setDebugInfo(errorDetails);
+          
+          throw new Error(responseData.error || responseData.message || 'Failed to create client');
+        }
+        
+        console.log('Client created successfully:', responseData);
+        
+        // Reset form
+        setName('');
+        setDomains('');
+        setEmails('');
+        
+        // Notify parent component
+        onClientAdded();
+      } catch (fetchError) {
+        console.error('Fetch error:', fetchError);
+        throw new Error(`Network error: ${fetchError.message}`);
       }
       
-      // Reset form
-      setName('');
-      setDomains('');
-      setEmails('');
-      
-      // Notify parent component
-      onClientAdded();
-      
     } catch (err) {
+      console.error('Client form error:', err);
       setError(err.message || 'An error occurred');
     } finally {
       setIsSubmitting(false);
@@ -92,9 +153,23 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
       <h2 className="text-lg font-medium mb-4 dark:text-white">Add New Client</h2>
       
-      {error && (
+      {authError && (
+        <div className="mb-4 p-4 bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 rounded-md">
+          <p className="font-medium">Authentication Required</p>
+          <p className="text-sm mt-1">Your session may have expired. Please <Link href="/" className="underline">sign in again</Link> to continue.</p>
+        </div>
+      )}
+      
+      {error && !authError && (
         <div className="mb-4 p-3 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 rounded-md text-sm">
           {error}
+        </div>
+      )}
+      
+      {debugInfo && (
+        <div className="mb-4 p-3 bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 rounded-md text-sm whitespace-pre-wrap">
+          <strong>Debug Info:</strong>
+          <pre className="mt-1 text-xs">{debugInfo}</pre>
         </div>
       )}
       
@@ -152,9 +227,12 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-600"
+            className="relative px-4 py-1.5 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-indigo-600 rounded-md shadow-sm overflow-hidden group disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isSubmitting ? 'Adding...' : 'Add Client'}
+            <span className="relative z-10">{isSubmitting ? 'Adding...' : 'Add Client'}</span>
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300 disabled:opacity-0"></div>
+            <div className="absolute inset-0 border-0 group-hover:border group-hover:border-white group-hover:border-opacity-30 rounded-md transition-all duration-300"></div>
+            <div className="absolute inset-0 -translate-y-full group-hover:translate-y-0 bg-gradient-to-r from-blue-300/20 to-indigo-400/20 transition-transform duration-500"></div>
           </button>
         </div>
       </form>
