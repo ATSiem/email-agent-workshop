@@ -8,7 +8,7 @@
   "scripts": {
     "predev": "./ensure-node-version.sh",
     "dev": "next dev --turbopack",
-    "prebuild": "./ensure-node-version.sh",
+    "prebuild": "./ensure-node-version.sh && npm test",
     "build": "next build",
     "prestart": "./ensure-node-version.sh",
     "start": "node scripts/init-database.js && next start -p ${PORT:-3000}",
@@ -24,7 +24,10 @@
     "test": "node tests/run-tests.js",
     "test:watch": "jest --watch",
     "test:api": "jest process-summaries-api.test.js",
-    "test:summarizer": "jest email-summarizer.test.js"
+    "test:summarizer": "jest email-summarizer.test.js",
+    "test:dev": "node scripts/run-env-tests.js development",
+    "test:prod": "node scripts/run-env-tests.js production",
+    "precommit": "npm test"
   },
   "dependencies": {
     "@ai-sdk/openai": "^1.1.12",
