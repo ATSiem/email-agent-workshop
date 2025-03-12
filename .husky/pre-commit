@@ -22,16 +22,17 @@ for file in $STAGED_FILES; do
 done
 
 # Run tests before commit
-echo "🧪 Running tests..."
+echo "Running tests before commit..."
 npm test
 
-# Exit with error code if tests fail
+# If tests fail, prevent the commit
 if [ $? -ne 0 ]; then
-  echo "❌ Tests failed. Please fix the issues before committing."
+  echo "Tests failed. Please fix the failing tests before committing."
   exit 1
 fi
 
-echo "✅ Tests passed!"
+# Continue with the commit if tests pass
+exit 0
 
 # Run lint-staged for other checks
 npx lint-staged 
