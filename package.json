@@ -11,7 +11,7 @@
     "prebuild": "./ensure-node-version.sh",
     "build": "next build",
     "prestart": "./ensure-node-version.sh",
-    "start": "next start",
+    "start": "next start -p ${PORT:-3000}",
     "lint": "next lint",
     "db:generate": "drizzle-kit generate --config=src/lib/db/config.ts",
     "db:migrate": "drizzle-kit migrate --config=src/lib/db/config.ts",

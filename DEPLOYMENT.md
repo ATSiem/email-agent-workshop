@@ -11,6 +11,10 @@
   - `db:update-clients`
   - `db:verify-clients`
   - `db:ensure-client-ids`
+- [ ] Ensure the start script in package.json uses the PORT environment variable:
+  ```json
+  "start": "next start -p ${PORT:-3000}"
+  ```
 
 ## Deployment
 
@@ -65,3 +69,8 @@
    - Added user_id column to clients table
    - Updated existing clients with default user ID
    - Added scripts for verification and maintenance 
+
+3. **Port Configuration**
+   - Updated start script to use Render's PORT environment variable
+   - Ensures proper routing for API requests in production
+   - Fallback to port 3000 for local development 
