@@ -129,12 +129,13 @@ if (typeof window === 'undefined') {
     try {
       // Export the db object first before importing migration-manager
       // This ensures db is fully initialized before migrations try to use it
-      module.exports = { db };
-      
-      // Now import and run migrations
-      const { runMigrations } = require('./migration-manager');
-      runMigrations().catch(err => {
-        console.error('Failed to run database migrations:', err);
+      // Using dynamic import for migration manager to avoid circular dependency
+      import('./migration-manager').then(({ runMigrations }) => {
+        runMigrations().catch(err => {
+          console.error('Failed to run database migrations:', err);
+        });
+      }).catch(error => {
+        console.error('Error importing migration manager:', error);
       });
     } catch (error) {
       console.error('Error importing migration manager:', error);
