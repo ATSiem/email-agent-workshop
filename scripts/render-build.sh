@@ -1,23 +1,40 @@
 #!/bin/bash
 
 # Render build script
-# This script is designed to be run during the build phase on Render
+echo "🚀 Starting Render build process..."
 
-echo "Starting Render build process..."
+# Create data directory
+mkdir -p data 2>/dev/null
 
-# Create data directory if it doesn't exist
-echo "Creating data directory..."
-mkdir -p data
+# Install system dependencies required for better-sqlite3
+echo "📦 Installing system dependencies..."
+apt-get update -qq >/dev/null 2>&1 || true
+apt-get install -y -qq build-essential python3 >/dev/null 2>&1 || true
 
-# Build the Next.js application
-echo "Building Next.js application..."
-npm run build
+# Set environment variables for native module compilation
+export npm_config_build_from_source=true
+export CFLAGS="-fPIC"
+export CXXFLAGS="-fPIC"
+export LDFLAGS="-fPIC"
+
+# Install dependencies with specific flags for native modules
+echo "📦 Installing dependencies..."
+npm install --build-from-source --no-fund --no-audit --loglevel=error
+
+# Verify better-sqlite3 installation
+if [ -d "node_modules/better-sqlite3" ]; then
+  echo "✅ better-sqlite3 module installed"
+else
+  echo "⚠️ WARNING: better-sqlite3 module not found"
+fi
+
+# Build the Next.js application with reduced output
+echo "🏗️ Building Next.js application..."
+npm run build:ci
 
 # Initialize the database with the correct schema
-echo "Initializing database schema..."
-# Remove existing database if it exists
-rm -f data/email_agent.db
-# Run the initialization script
+echo "🗃️ Initializing database schema..."
+rm -f data/email_agent.db 2>/dev/null
 npm run db:init
 
-echo "Build process completed successfully!" 
+echo "✅ Build process completed!" 

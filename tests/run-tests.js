@@ -15,6 +15,7 @@ const TEST_DIR = path.join(__dirname);
 const TEST_FILE_PATTERN = /\.test\.js$/;
 const JEST_BIN = path.join(__dirname, '..', 'node_modules', '.bin', 'jest');
 const JEST_CONFIG = path.join(__dirname, 'jest.config.js');
+const JEST_BUILD_CONFIG = path.join(__dirname, 'jest.build.config.js');
 const SERVER_URL = 'http://localhost:3000';
 const DATA_DIR = path.join(__dirname, '..', 'data');
 
@@ -34,6 +35,9 @@ const colors = {
 // Check if running in CI environment (like Render)
 const isCI = process.env.CI === 'true' || process.env.RENDER === 'true';
 
+// Use build config in CI environments
+const configToUse = isCI ? JEST_BUILD_CONFIG : JEST_CONFIG;
+
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
   console.log(`Creating data directory: ${DATA_DIR}`);
@@ -41,7 +45,11 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 // Print header
-console.log(`\n${colors.bright}${colors.blue}=== Email Agent Test Runner ===${colors.reset}\n`);
+if (!isCI) {
+  console.log(`\n${colors.bright}${colors.blue}=== Email Agent Test Runner ===${colors.reset}\n`);
+} else {
+  console.log(`\n${colors.bright}${colors.blue}=== Running Build Tests ===${colors.reset}\n`);
+}
 
 // Check if Jest is installed
 if (!fs.existsSync(JEST_BIN)) {
@@ -51,8 +59,8 @@ if (!fs.existsSync(JEST_BIN)) {
 }
 
 // Check if Jest config exists
-if (!fs.existsSync(JEST_CONFIG)) {
-  console.error(`${colors.red}Error: Jest configuration not found at ${JEST_CONFIG}${colors.reset}`);
+if (!fs.existsSync(configToUse)) {
+  console.error(`${colors.red}Error: Jest configuration not found at ${configToUse}${colors.reset}`);
   process.exit(1);
 }
 
@@ -83,21 +91,30 @@ if (testFiles.length === 0) {
   process.exit(0);
 }
 
-console.log(`${colors.cyan}Found ${testFiles.length} test files:${colors.reset}`);
-testFiles.forEach(file => {
-  console.log(`  - ${path.basename(file)}`);
-});
-console.log('');
+// In CI, only log the number of test files
+if (!isCI) {
+  console.log(`${colors.cyan}Found ${testFiles.length} test files:${colors.reset}`);
+  testFiles.forEach(file => {
+    console.log(`  - ${path.basename(file)}`);
+  });
+  console.log('');
+} else {
+  console.log(`${colors.cyan}Found ${testFiles.length} test files${colors.reset}`);
+}
 
 // Check server status before running tests
 (async () => {
   const serverRunning = await checkServerRunning();
   
   if (!serverRunning) {
-    console.warn(`${colors.yellow}${colors.bright}⚠️ WARNING: Local server is not running at ${SERVER_URL}${colors.reset}`);
-    console.warn(`${colors.yellow}Some tests require a running server and will be skipped.${colors.reset}`);
-    console.warn(`${colors.yellow}To run all tests with full coverage, start the server with:${colors.reset}`);
-    console.warn(`${colors.bright}  npm run dev${colors.reset}\n`);
+    if (!isCI) {
+      console.warn(`${colors.yellow}${colors.bright}⚠️ WARNING: Local server is not running at ${SERVER_URL}${colors.reset}`);
+      console.warn(`${colors.yellow}Some tests require a running server and will be skipped.${colors.reset}`);
+      console.warn(`${colors.yellow}To run all tests with full coverage, start the server with:${colors.reset}`);
+      console.warn(`${colors.bright}  npm run dev${colors.reset}\n`);
+    } else {
+      console.warn(`${colors.yellow}⚠️ Server not running - some tests will be skipped${colors.reset}`);
+    }
     
     // Ask for confirmation to continue if not in CI
     if (process.stdout.isTTY && !isCI) {
@@ -109,12 +126,16 @@ console.log('');
   }
 
   // Run tests with real-time output
-  console.log(`${colors.bright}${colors.magenta}Running tests with config: ${JEST_CONFIG}${colors.reset}\n`);
+  if (!isCI) {
+    console.log(`${colors.bright}${colors.magenta}Running tests with config: ${configToUse}${colors.reset}\n`);
+  } else {
+    console.log(`${colors.magenta}Running tests with reduced output${colors.reset}\n`);
+  }
   
   // Use spawn instead of execSync to get real-time output
   const jestProcess = spawn(JEST_BIN, [
-    '--config', JEST_CONFIG, 
-    '--verbose',
+    '--config', configToUse, 
+    isCI ? '' : '--verbose',
     // In CI environments, don't fail on database tests
     isCI ? '--testPathIgnorePatterns=test-db.test.js,processed-for-vector-column.test.js,database.test.ts' : ''
   ].filter(Boolean), {
