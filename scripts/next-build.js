@@ -46,6 +46,16 @@ const filterOutput = (data) => {
     return;
   }
   
+  // Skip repetitive SQLite warnings
+  if (output.includes('⚠️ SQLite create_function method not available') ||
+      output.includes('⚠️ Vector search (AI search) functionality is disabled') ||
+      output.includes('⚠️ To enable this feature, upgrade to Render paid tier') ||
+      output.includes('⚠️ Add a persistent disk and set RENDER_DISK_MOUNTED')) {
+    // We'll let these through once from our modified database code
+    // but filter out duplicates during the build process
+    return;
+  }
+  
   // Skip verbose output
   if (output.includes('Creating an optimized production build') ||
       output.includes('Compiled successfully') ||
@@ -103,4 +113,11 @@ buildProcess.on('close', (code) => {
     console.log(`${colors.green}${colors.bright}Build completed successfully!${colors.reset}`);
     process.exit(0);
   }
-}); 
+});
+
+// Export for testing
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports.__test__ = {
+    filterOutput
+  };
+} 

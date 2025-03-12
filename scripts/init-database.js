@@ -97,8 +97,8 @@ try {
   console.error('Database initialization error:', error.message);
   
   if (error.code === 'MODULE_NOT_FOUND' && error.requireStack && error.requireStack[0].includes('better-sqlite3')) {
-    console.error('The better-sqlite3 module is missing. This is expected on Render free tier.');
-    console.error('Some database features will be limited. To enable full functionality, upgrade to a paid Render plan.');
+    // More concise error message
+    console.error('⚠️ better-sqlite3 module not available (expected on Render free tier)');
     
     // Create an empty database file to prevent further errors
     const fs = require('fs');

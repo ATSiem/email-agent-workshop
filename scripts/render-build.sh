@@ -28,6 +28,10 @@ else
   echo "⚠️ WARNING: better-sqlite3 module not found"
 fi
 
+# Note about SQLite warnings
+echo "ℹ️ Note: SQLite warnings about vector search functionality are filtered to reduce log verbosity"
+echo "ℹ️ These features require a Render paid tier with persistent disk"
+
 # Build the Next.js application with reduced output
 echo "🏗️ Building Next.js application..."
 npm run build:ci

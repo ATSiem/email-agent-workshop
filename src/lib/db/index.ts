@@ -5,6 +5,9 @@ import * as schema from "./schema";
 import { env, isRenderFreeTier } from "~/lib/env";
 export * from "drizzle-orm";
 
+// Track if SQLite warnings have been shown
+let sqliteWarningsShown = false;
+
 // Import better-sqlite3 with try-catch to handle case when it's not available
 let Database;
 try {
@@ -147,7 +150,10 @@ if (typeof window === 'undefined') {
         }
       });
       console.log('SQLite vector search extensions successfully initialized');
-    } else {
+    } else if (!sqliteWarningsShown) {
+      // Only show these warnings once
+      sqliteWarningsShown = true;
+      
       if (isRenderFreeTier) {
         console.warn('⚠️ SQLite create_function method not available on Render free tier');
         console.warn('⚠️ Vector search (AI search) functionality is disabled');
