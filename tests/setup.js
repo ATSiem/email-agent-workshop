@@ -25,6 +25,8 @@ jest.mock('next/server', () => ({
 process.env = {
   ...process.env,
   NODE_ENV: 'test',
+  // Set RENDER=true if we're running on Render (detected by checking for Render-specific env vars)
+  RENDER: process.env.RENDER_SERVICE_ID ? 'true' : process.env.RENDER || 'false'
 };
 
 // Silence console logs during tests

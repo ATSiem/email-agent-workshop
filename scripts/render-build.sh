@@ -5,6 +5,10 @@
 
 echo "Starting Render build process..."
 
+# Create data directory if it doesn't exist
+echo "Creating data directory..."
+mkdir -p data
+
 # Build the Next.js application
 echo "Building Next.js application..."
 npm run build

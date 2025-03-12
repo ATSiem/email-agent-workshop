@@ -19,7 +19,20 @@
 
 ## Deployment to Render
 
-### Option 1: Standard Build Command (Recommended)
+### Option 1: Using the render:build Script (Recommended)
+
+Use the render:build script in your Render configuration:
+
+```
+npm run render:build
+```
+
+This script:
+1. Creates the necessary data directory
+2. Builds the Next.js application
+3. Initializes the database with the correct schema
+
+### Option 2: Standard Build Command
 
 Use the standard build command in Render:
 
@@ -27,9 +40,9 @@ Use the standard build command in Render:
 npm install && npm run build
 ```
 
-The application will automatically initialize the database on startup.
+Note: This may fail if the data directory doesn't exist.
 
-### Option 2: Custom Build Script
+### Option 3: Custom Build Script
 
 If you need to perform additional steps during the build process, use the custom build script:
 
@@ -37,10 +50,13 @@ If you need to perform additional steps during the build process, use the custom
 chmod +x scripts/render-build.sh && ./scripts/render-build.sh
 ```
 
-This script:
-1. Builds the Next.js application
-2. Initializes the database with the correct schema
-3. Ensures all required tables and columns exist
+### Important Render Configuration
+
+1. Set the `DB_PATH` environment variable to `/var/data/email_agent.db`
+2. Add a disk to your Render service and mount it at `/var/data`
+3. Set `NODE_ENV` to `production`
+
+For more detailed instructions, see the [RENDER_DEPLOYMENT.md](./RENDER_DEPLOYMENT.md) file.
 
 ## Post-Deployment Testing
 

@@ -27,7 +27,8 @@
     "test:summarizer": "jest email-summarizer.test.js",
     "test:dev": "node scripts/run-env-tests.js development",
     "test:prod": "node scripts/run-env-tests.js production",
-    "precommit": "npm test"
+    "precommit": "npm test",
+    "render:build": "chmod +x scripts/render-build.sh && ./scripts/render-build.sh"
   },
   "dependencies": {
     "@ai-sdk/openai": "^1.1.12",
