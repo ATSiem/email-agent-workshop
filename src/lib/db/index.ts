@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import { existsSync, mkdirSync } from "fs";
 import { dirname } from "path";
 import * as schema from "./schema";
-import { env } from "~/lib/env";
+import { env, isRenderFreeTier } from "~/lib/env";
 export * from "drizzle-orm";
 
 // For server-side database connection
@@ -118,7 +118,12 @@ if (typeof window === 'undefined') {
         }
       });
     } else {
-      console.warn('SQLite create_function method not available - vector search functionality will be limited');
+      if (isRenderFreeTier) {
+        console.warn('SQLite create_function method not available on Render free tier - vector search functionality is disabled');
+        console.warn('TODO: Upgrade to Render paid tier ($7/mo) to enable vector search functionality');
+      } else {
+        console.warn('SQLite create_function method not available - vector search functionality will be limited');
+      }
     }
     
     db = drizzle(sqlite, { schema });

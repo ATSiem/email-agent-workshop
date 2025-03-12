@@ -45,6 +45,23 @@ To ensure your database persists between deployments:
 2. Mount it at `/var/data`
 3. Set the `DB_PATH` environment variable to `/var/data/email_agent.db`
 
+## Feature Limitations on Free Tier
+
+### Vector Search (AI Search)
+
+The free tier of Render does not support SQLite extensions, which are required for vector search functionality. As a result, the "AI search" feature is disabled on the free tier.
+
+**TODO: Upgrade to Render's paid tier ($7/mo or higher) to enable vector search functionality.**
+
+When running on the free tier:
+- The "Use AI search" checkbox will be disabled
+- A tooltip will explain why it's disabled
+- Regular keyword search will still work
+
+### Persistent Storage
+
+The free tier does not support persistent disks, so data will be reset on each deployment. For a production environment, consider upgrading to a paid tier with persistent storage.
+
 ## Troubleshooting
 
 ### Database Issues

@@ -2,6 +2,7 @@ import { db } from "~/lib/db";
 import { getGraphClient } from "~/lib/auth/microsoft";
 import { findSimilarEmails } from "./email-embeddings";
 import { queueBackgroundTask } from "./background-processor";
+import { isRenderFreeTier } from "~/lib/env";
 
 // Parameters for email fetching
 interface EmailParams {
@@ -88,7 +89,8 @@ export async function getClientEmails(params: EmailParams) {
     let vectorEmails = [];
     
     // If search query is provided and vector search is enabled, try semantic search
-    if (searchQuery && useVectorSearch) {
+    // Skip vector search on Render free tier as it's not supported
+    if (searchQuery && useVectorSearch && !isRenderFreeTier) {
       console.log(`EmailFetcher - Using vector search for query: "${searchQuery}"`);
       try {
         vectorEmails = await findSimilarEmails(searchQuery, {
@@ -103,6 +105,8 @@ export async function getClientEmails(params: EmailParams) {
         console.error("EmailFetcher - Vector search error:", error);
         // Continue with traditional search if vector search fails
       }
+    } else if (searchQuery && useVectorSearch && isRenderFreeTier) {
+      console.log(`EmailFetcher - Skipping vector search on Render free tier for query: "${searchQuery}"`);
     }
     
     // Always perform traditional SQL search
@@ -110,7 +114,7 @@ export async function getClientEmails(params: EmailParams) {
     console.log(`EmailFetcher - Found ${sqlEmails.length} emails via SQL search`);
     
     // Use vector search results if available and not empty, otherwise fall back to SQL results
-    if (searchQuery && useVectorSearch && vectorEmails.length > 0) {
+    if (searchQuery && useVectorSearch && vectorEmails.length > 0 && !isRenderFreeTier) {
       dbEmails = vectorEmails;
     } else {
       dbEmails = sqlEmails;

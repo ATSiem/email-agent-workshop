@@ -56,6 +56,16 @@ chmod +x scripts/render-build.sh && ./scripts/render-build.sh
 2. Add a disk to your Render service and mount it at `/var/data`
 3. Set `NODE_ENV` to `production`
 
+### Render Free Tier Limitations
+
+**TODO: Upgrade to Render's paid tier ($7/mo or higher) to enable vector search functionality.**
+
+The free tier of Render has the following limitations:
+
+1. **No Vector Search**: SQLite extensions are not supported, which disables the AI search functionality
+2. **No Persistent Storage**: Data will be reset on each deployment
+3. **Limited Resources**: May experience slower performance under load
+
 For more detailed instructions, see the [RENDER_DEPLOYMENT.md](./RENDER_DEPLOYMENT.md) file.
 
 ## Post-Deployment Testing

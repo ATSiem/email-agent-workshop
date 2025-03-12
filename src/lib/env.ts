@@ -76,6 +76,17 @@ export const env = getEnvVariables();
 // Export a helper to check if running in production
 export const isProduction = process.env.NODE_ENV === 'production';
 
+// Export a helper to check if running on Render
+export const isRender = typeof process !== 'undefined' && 
+  (process.env.RENDER === 'true' || process.env.RENDER_SERVICE_ID !== undefined);
+
+// Export a helper to check if running on Render free tier
+// This will be true if we're on Render and don't have a disk mounted
+export const isRenderFreeTier = isRender && !process.env.RENDER_DISK_MOUNTED;
+
+// TODO: Upgrade to Render's paid tier ($7/mo) to enable vector search functionality
+// The free tier doesn't support SQLite extensions needed for vector search
+
 // Export a helper to get URL with appropriate HTTP/HTTPS
 export function getBaseUrl() {
   if (typeof window !== 'undefined') {
