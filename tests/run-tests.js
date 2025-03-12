@@ -34,6 +34,7 @@ const colors = {
 
 // Check if running in CI environment (like Render)
 const isCI = process.env.CI === 'true' || process.env.RENDER === 'true';
+const isRender = process.env.RENDER === 'true' || process.env.RENDER_EXTERNAL_URL !== undefined;
 
 // Use build config in CI environments
 const configToUse = isCI ? JEST_BUILD_CONFIG : JEST_CONFIG;
@@ -132,18 +133,25 @@ if (!isCI) {
     console.log(`${colors.magenta}Running tests with reduced output${colors.reset}\n`);
   }
   
+  // If running on Render, warn about vector tests
+  if (isRender) {
+    console.warn(`${colors.yellow}⚠️ Running on Render - vector-related tests will be skipped${colors.reset}`);
+  }
+  
   // Use spawn instead of execSync to get real-time output
   const jestProcess = spawn(JEST_BIN, [
     '--config', configToUse, 
     isCI ? '' : '--verbose',
     // In CI environments, don't fail on database tests
-    isCI ? '--testPathIgnorePatterns=test-db.test.js,processed-for-vector-column.test.js,database.test.ts' : ''
+    isCI ? '--testPathIgnorePatterns=test-db.test.js' : ''
   ].filter(Boolean), {
     stdio: 'inherit', // Use inherit to preserve interactive features like progress bar
     env: {
       ...process.env,
       NODE_ENV: 'test',
-      SERVER_RUNNING: serverRunning ? 'true' : 'false'
+      SERVER_RUNNING: serverRunning ? 'true' : 'false',
+      RENDER: isRender ? 'true' : 'false',
+      DISABLE_VECTOR_TESTS: isRender ? 'true' : process.env.DISABLE_VECTOR_TESTS || 'false'
     }
   });
 

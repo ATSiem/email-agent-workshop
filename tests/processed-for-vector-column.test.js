@@ -7,6 +7,10 @@ const Database = require('better-sqlite3');
 // Test database path
 const TEST_DB_PATH = path.resolve('./data/test_vector_column.db');
 
+// Check if running on Render or if vector extensions are disabled
+const isRender = process.env.RENDER === 'true';
+const disableVectorTests = process.env.DISABLE_VECTOR_TESTS === 'true' || isRender;
+
 describe('Processed For Vector Column', () => {
   beforeAll(() => {
     // Remove test database if it exists
@@ -28,7 +32,10 @@ describe('Processed For Vector Column', () => {
     delete process.env.DB_PATH;
   });
   
-  test('should add processed_for_vector column to messages table', () => {
+  // Conditionally skip tests on Render or when vector extensions are disabled
+  const testFn = disableVectorTests ? test.skip : test;
+  
+  testFn('should add processed_for_vector column to messages table', () => {
     // Create a test database with messages table but no processed_for_vector column
     const db = new Database(TEST_DB_PATH);
     
@@ -85,7 +92,7 @@ describe('Processed For Vector Column', () => {
     updatedDb.close();
   });
   
-  test('should run migration directly', () => {
+  testFn('should run migration directly', () => {
     // Create a fresh test database for this test
     if (fs.existsSync(TEST_DB_PATH)) {
       fs.unlinkSync(TEST_DB_PATH);

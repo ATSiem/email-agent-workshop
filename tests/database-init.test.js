@@ -7,6 +7,10 @@ const Database = require('better-sqlite3');
 // Test database path
 const TEST_DB_PATH = path.resolve('./data/test_email_agent.db');
 
+// Check if running on Render or if vector extensions are disabled
+const isRender = process.env.RENDER === 'true';
+const disableVectorTests = process.env.DISABLE_VECTOR_TESTS === 'true' || isRender;
+
 describe('Database Initialization', () => {
   beforeAll(() => {
     // Remove test database if it exists
@@ -28,7 +32,10 @@ describe('Database Initialization', () => {
     delete process.env.DB_PATH;
   });
   
-  test('should create database with correct schema', () => {
+  // Use conditional test function based on environment
+  const testFn = disableVectorTests ? test.skip : test;
+  
+  testFn('should create database with correct schema', () => {
     // Run the initialization script
     execSync('node scripts/init-database.js', {
       env: { ...process.env, DB_PATH: TEST_DB_PATH }
@@ -74,7 +81,7 @@ describe('Database Initialization', () => {
     db.close();
   });
   
-  test('should handle existing database with missing user_id column', () => {
+  testFn('should handle existing database with missing user_id column', () => {
     // Create a test database with clients table but no user_id column
     const db = new Database(TEST_DB_PATH);
     

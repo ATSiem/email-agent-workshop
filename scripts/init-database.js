@@ -5,7 +5,7 @@ try {
   const Database = require('better-sqlite3');
   
   // Get database path from environment or use default
-  const dbPath = process.env.SQLITE_DB_PATH || './data/email_agent.db';
+  const dbPath = process.env.SQLITE_DB_PATH || process.env.DB_PATH || './data/email_agent.db';
   
   // Ensure directory exists
   const dbDir = path.dirname(dbPath);
@@ -34,7 +34,9 @@ try {
       summary TEXT NOT NULL,
       labels TEXT NOT NULL,
       cc TEXT DEFAULT '',
-      bcc TEXT DEFAULT ''
+      bcc TEXT DEFAULT '',
+      embedding TEXT,
+      processed_for_vector INTEGER DEFAULT 0
     );
     
     CREATE TABLE IF NOT EXISTS clients (
@@ -43,7 +45,8 @@ try {
       domains TEXT NOT NULL,
       emails TEXT NOT NULL,
       created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      user_id TEXT
     );
     
     CREATE TABLE IF NOT EXISTS report_templates (
@@ -76,17 +79,42 @@ try {
       FOREIGN KEY (client_id) REFERENCES clients(id)
     );
     
-    -- Add embedding column to messages table if it doesn't exist
-    PRAGMA table_info(messages);
+    -- Create migrations table if it doesn't exist
+    CREATE TABLE IF NOT EXISTS migrations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      applied_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
   `);
   
-  // Check if embedding column exists
-  const tableInfo = db.prepare('PRAGMA table_info(messages)').all();
-  const hasEmbeddingColumn = tableInfo.some(column => column.name === 'embedding');
+  // Always record migrations for columns that are part of the initial schema
+  // This ensures that migration records exist even for fresh database creations
+  db.prepare(`
+    INSERT OR IGNORE INTO migrations (name, applied_at) 
+    VALUES ('add_user_id_column', unixepoch())
+  `).run();
   
-  if (!hasEmbeddingColumn) {
-    console.log('Adding embedding column to messages table');
-    db.exec('ALTER TABLE messages ADD COLUMN embedding TEXT;');
+  db.prepare(`
+    INSERT OR IGNORE INTO migrations (name, applied_at) 
+    VALUES ('add_processed_for_vector_column', unixepoch())
+  `).run();
+  
+  // Check if user_id column exists in clients table
+  const clientsTableInfo = db.prepare('PRAGMA table_info(clients)').all();
+  const hasUserIdColumn = clientsTableInfo.some(column => column.name === 'user_id');
+  
+  if (!hasUserIdColumn) {
+    console.log('Adding user_id column to clients table');
+    db.exec('ALTER TABLE clients ADD COLUMN user_id TEXT;');
+  }
+  
+  // Check if processed_for_vector column exists in messages table
+  const messagesTableInfo = db.prepare('PRAGMA table_info(messages)').all();
+  const hasProcessedForVectorColumn = messagesTableInfo.some(column => column.name === 'processed_for_vector');
+  
+  if (!hasProcessedForVectorColumn) {
+    console.log('Adding processed_for_vector column to messages table');
+    db.exec('ALTER TABLE messages ADD COLUMN processed_for_vector INTEGER DEFAULT 0;');
   }
   
   console.log('Database initialization completed successfully');
@@ -102,7 +130,7 @@ try {
     
     // Create an empty database file to prevent further errors
     const fs = require('fs');
-    const dbPath = process.env.SQLITE_DB_PATH || './data/email_agent.db';
+    const dbPath = process.env.SQLITE_DB_PATH || process.env.DB_PATH || './data/email_agent.db';
     const dbDir = require('path').dirname(dbPath);
     
     if (!fs.existsSync(dbDir)) {
