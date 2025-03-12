@@ -223,3 +223,30 @@ The application associates clients with specific users through the `user_id` fie
   ```
 
 These scripts help maintain data integrity when migrating from older versions of the application or when setting up a new environment. See the `scripts/README.md` file for more detailed information about these database maintenance tools.
+
+## Database Management
+
+The application uses SQLite for data storage. The database is automatically initialized when the application starts, ensuring the correct schema is in place.
+
+### Database Initialization
+
+- The database is automatically initialized when the application starts
+- The initialization script checks for the existence of required tables and columns
+- If the database or tables don't exist, they are created with the correct schema
+- If tables exist but are missing required columns (like `user_id`), they are added automatically
+
+### Testing Database Initialization
+
+Run the database initialization tests to verify the schema is correctly set up:
+
+```bash
+npm test tests/database-init.test.js
+```
+
+### Custom Database Path
+
+You can specify a custom database path using the `DB_PATH` environment variable:
+
+```bash
+DB_PATH=/path/to/custom/database.db npm start
+```
