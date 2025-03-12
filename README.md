@@ -202,3 +202,24 @@ The application uses environment variables to manage secrets and configuration. 
 - The directory is excluded from git via `.gitignore`
 - Backups of production data should be properly secured
 - Never commit database files to version control
+
+### Client User ID Management
+
+The application associates clients with specific users through the `user_id` field. For backward compatibility and database maintenance, several utility scripts are provided:
+
+- **Update Client User IDs**: Ensure all clients have a user ID assigned
+  ```bash
+  npm run db:ensure-client-ids
+  ```
+
+- **Verify Client User IDs**: Check the status of client user ID assignments
+  ```bash
+  npm run db:verify-clients
+  ```
+
+- **Custom User ID**: You can specify a custom default user ID
+  ```bash
+  DEFAULT_USER_ID=custom@example.com npm run db:ensure-client-ids
+  ```
+
+These scripts help maintain data integrity when migrating from older versions of the application or when setting up a new environment. See the `scripts/README.md` file for more detailed information about these database maintenance tools.

@@ -14,6 +14,20 @@ interface EmailParams {
   useVectorSearch?: boolean; // New: Flag to enable vector search
 }
 
+// Function to normalize domain format for consistent matching
+const normalizeDomain = (domain: string): string => {
+  // Remove @ prefix if present
+  let normalizedDomain = domain.startsWith('@') ? domain.substring(1) : domain;
+  
+  // Ensure domain has at least one dot (unless it's a simple name like 'localhost')
+  if (!normalizedDomain.includes('.') && normalizedDomain !== 'localhost') {
+    // If no dot, assume it's a TLD and add .com (e.g., "acme" becomes "acme.com")
+    normalizedDomain = `${normalizedDomain}.com`;
+  }
+  
+  return normalizedDomain.toLowerCase();
+};
+
 // Function to get emails from both database and Microsoft Graph API
 export async function getClientEmails(params: EmailParams) {
   try {
@@ -32,11 +46,15 @@ export async function getClientEmails(params: EmailParams) {
     console.log('EmailFetcher - Original client domains:', clientDomains);
     console.log('EmailFetcher - Original client emails:', clientEmails);
     
+    // Normalize all client domains
+    const normalizedDomains = clientDomains.map(normalizeDomain);
+    console.log('EmailFetcher - Normalized client domains:', normalizedDomains);
+    
     // Expand client domains to include common variations
-    const expandedDomains = [...clientDomains];
+    const expandedDomains = [...normalizedDomains];
     
     // If any email from albany.edu is included, add the domain
-    if (clientEmails.some(email => email.endsWith('@albany.edu')) && !clientDomains.includes('albany.edu')) {
+    if (clientEmails.some(email => email.endsWith('@albany.edu')) && !expandedDomains.includes('albany.edu')) {
       console.log('EmailFetcher - Adding albany.edu domain based on email addresses');
       expandedDomains.push('albany.edu');
     }
@@ -211,9 +229,26 @@ async function getClientEmailsFromDatabase(params: EmailParams) {
     // Build domain-based conditions
     let domainConditions = '';
     if (clientDomains.length > 0) {
-      const domainFilters = clientDomains.map((domain, i) => {
+      // Normalize all domains for consistent matching
+      const normalizedDomains = clientDomains.map(normalizeDomain);
+      
+      const domainFilters = normalizedDomains.map((domain, i) => {
         const sanitizedDomain = domain.replace(/'/g, "''");  // SQL escape single quotes
-        return `("from" LIKE '%@${sanitizedDomain}%' OR "from" LIKE '%@%.${sanitizedDomain}%' OR "to" LIKE '%@${sanitizedDomain}%' OR "to" LIKE '%@%.${sanitizedDomain}%'${hasCcBccColumns ? ` OR "cc" LIKE '%@${sanitizedDomain}%' OR "cc" LIKE '%@%.${sanitizedDomain}%' OR "bcc" LIKE '%@${sanitizedDomain}%' OR "bcc" LIKE '%@%.${sanitizedDomain}%'` : ''})`;
+        
+        // Create more precise domain matching conditions
+        // Match exact domain after @ or subdomain ending with .domain
+        return `(
+          "from" LIKE '%@${sanitizedDomain}%' OR 
+          "from" LIKE '%@%.${sanitizedDomain}%' OR 
+          "to" LIKE '%@${sanitizedDomain}%' OR 
+          "to" LIKE '%@%.${sanitizedDomain}%'
+          ${hasCcBccColumns ? 
+            ` OR "cc" LIKE '%@${sanitizedDomain}%' OR 
+              "cc" LIKE '%@%.${sanitizedDomain}%' OR 
+              "bcc" LIKE '%@${sanitizedDomain}%' OR 
+              "bcc" LIKE '%@%.${sanitizedDomain}%'` 
+            : ''}
+        )`;
       }).join(' OR ');
       
       if (domainFilters) {
@@ -369,33 +404,41 @@ async function getClientEmailsFromGraph(params: EmailParams) {
         const hasPartialMatch = () => {
           // Check client domains
           if (clientDomains && clientDomains.length > 0) {
-            // Original domain matching logic
-            const fromDomainMatch = clientDomains.some(domain => 
-              fromEmail?.includes(`@${domain}`) || fromEmail?.endsWith(`.${domain}`));
+            // Normalize all domains for consistent matching
+            const normalizedClientDomains = clientDomains.map(normalizeDomain);
             
-            // Enhanced domain matching - Check if any domain is a subdomain of client domains
-            const fromSubdomainMatch = !fromDomainMatch && clientDomains.some(domain => {
+            // Original domain matching logic with normalized domains
+            const fromDomainMatch = normalizedClientDomains.some(domain => {
+              // Get the domain part of the from email
               const fromParts = fromEmail?.split('@');
               if (fromParts && fromParts.length > 1) {
-                const fromDomain = fromParts[1];
-                return fromDomain.endsWith(`.${domain}`) || fromDomain === domain;
+                const fromDomain = fromParts[1].toLowerCase();
+                // Match exact domain or subdomain
+                return fromDomain === domain || fromDomain.endsWith(`.${domain}`);
               }
               return false;
             });
             
-            if (fromDomainMatch || fromSubdomainMatch) {
+            if (fromDomainMatch) {
               return true;
             }
             
-            // Check recipient, cc and bcc for domain matches
-            const toDomainMatch = toRecipients?.some(addr => 
-              clientDomains.some(domain => addr.includes(`@${domain}`) || addr.endsWith(`.${domain}`)));
+            // Check recipient, cc and bcc for domain matches with normalized domains
+            const checkAddressForDomainMatch = (address: string) => {
+              const addressParts = address.split('@');
+              if (addressParts.length > 1) {
+                const addressDomain = addressParts[1].toLowerCase();
+                return normalizedClientDomains.some(domain => 
+                  addressDomain === domain || addressDomain.endsWith(`.${domain}`)
+                );
+              }
+              return false;
+            };
             
-            const ccDomainMatch = ccRecipients?.some(addr => 
-              clientDomains.some(domain => addr.includes(`@${domain}`) || addr.endsWith(`.${domain}`)));
-            
-            const bccDomainMatch = bccRecipients?.some(addr => 
-              clientDomains.some(domain => addr.includes(`@${domain}`) || addr.endsWith(`.${domain}`)));
+            // Check all recipient types
+            const toDomainMatch = toRecipients?.some(checkAddressForDomainMatch);
+            const ccDomainMatch = ccRecipients?.some(checkAddressForDomainMatch);
+            const bccDomainMatch = bccRecipients?.some(checkAddressForDomainMatch);
             
             if (toDomainMatch || ccDomainMatch || bccDomainMatch) {
               return true;
@@ -428,15 +471,31 @@ async function getClientEmailsFromGraph(params: EmailParams) {
             for (const clientEmail of clientEmails) {
               const [, clientDomain] = clientEmail.split('@');
               if (clientDomain) {
+                // Normalize the domain from the client email
+                const normalizedClientDomain = normalizeDomain(clientDomain);
+                
                 // Check if from email uses same domain
-                if (fromEmail?.includes(`@${clientDomain}`)) {
-                  return true;
+                const fromParts = fromEmail?.split('@');
+                if (fromParts && fromParts.length > 1) {
+                  const fromDomain = fromParts[1].toLowerCase();
+                  if (fromDomain === normalizedClientDomain || fromDomain.endsWith(`.${normalizedClientDomain}`)) {
+                    return true;
+                  }
                 }
                 
                 // Check if any recipient uses same domain
-                if (toRecipients?.some(addr => addr.includes(`@${clientDomain}`)) ||
-                    ccRecipients?.some(addr => addr.includes(`@${clientDomain}`)) ||
-                    bccRecipients?.some(addr => addr.includes(`@${clientDomain}`))) {
+                const checkRecipientDomain = (addr: string) => {
+                  const addrParts = addr.split('@');
+                  if (addrParts.length > 1) {
+                    const addrDomain = addrParts[1].toLowerCase();
+                    return addrDomain === normalizedClientDomain || addrDomain.endsWith(`.${normalizedClientDomain}`);
+                  }
+                  return false;
+                };
+                
+                if (toRecipients?.some(checkRecipientDomain) ||
+                    ccRecipients?.some(checkRecipientDomain) ||
+                    bccRecipients?.some(checkRecipientDomain)) {
                   return true;
                 }
               }

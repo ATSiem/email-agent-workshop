@@ -13,10 +13,26 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
   const [emails, setEmails] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  
+  // Function to normalize domain format
+  const normalizeDomain = (domain: string): string => {
+    // Remove @ prefix if present
+    let normalizedDomain = domain.startsWith('@') ? domain.substring(1) : domain;
+    
+    // Ensure domain has at least one dot (unless it's a simple name like 'localhost')
+    if (!normalizedDomain.includes('.') && normalizedDomain !== 'localhost') {
+      // If no dot, assume it's a TLD and add .com (e.g., "acme" becomes "acme.com")
+      normalizedDomain = `${normalizedDomain}.com`;
+    }
+    
+    return normalizedDomain.toLowerCase();
+  };
   
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
+    setSuccessMessage('');
     
     try {
       setIsSubmitting(true);
@@ -27,9 +43,12 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
       }
       
       // Parse domains and emails from comma-separated lists
-      const domainList = domains.split(',')
-        .map(d => d.trim().toLowerCase())
+      const rawDomainList = domains.split(',')
+        .map(d => d.trim())
         .filter(d => d.length > 0);
+      
+      // Normalize domain formats
+      const domainList = rawDomainList.map(normalizeDomain);
         
       const emailList = emails.split(',')
         .map(e => e.trim().toLowerCase())
@@ -73,6 +92,9 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
         throw new Error(data.error || 'Failed to create client');
       }
       
+      // Show success message
+      setSuccessMessage(`Client "${name}" added successfully!`);
+      
       // Reset form
       setName('');
       setDomains('');
@@ -95,6 +117,12 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
       {error && (
         <div className="mb-4 p-3 bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 rounded-md text-sm">
           {error}
+        </div>
+      )}
+      
+      {successMessage && (
+        <div className="mb-4 p-3 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 rounded-md text-sm">
+          {successMessage}
         </div>
       )}
       
@@ -127,7 +155,7 @@ export function ClientForm({ onClientAdded }: ClientFormProps) {
             placeholder="acme.com, acmecorp.net"
           />
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            Email domains to match (e.g., &ldquo;acme.com&rdquo;)
+            Email domains to match (e.g., &ldquo;acme.com&rdquo;). You can enter with or without @ prefix.
           </p>
         </div>
         

@@ -86,12 +86,38 @@ This guide helps you set up the Email Agent with secure Microsoft OAuth authenti
 
 4. After signing in, click the sync button to fetch emails from your mailbox
 
+## Step 6: Database Maintenance (For Existing Installations)
+
+If you're upgrading from a previous version or need to ensure all clients have user IDs assigned:
+
+1. Run the database migration to add the user_id column if needed:
+   ```bash
+   node scripts/add-user-id-column.js
+   ```
+
+2. Update existing clients with user IDs:
+   ```bash
+   # Using default user ID (dev@example.com)
+   npm run db:ensure-client-ids
+   
+   # Or with a custom user ID
+   DEFAULT_USER_ID=your@email.com npm run db:ensure-client-ids
+   ```
+
+3. Verify that all clients have user IDs assigned:
+   ```bash
+   npm run db:verify-clients
+   ```
+
+These steps ensure backward compatibility with existing clients while maintaining the new user ID requirement for future clients.
+
 ## Usage
 
 - Each user signs in with their own Microsoft 365 account
 - Users can only access their own emails (enforced by Microsoft's OAuth)
 - Emails are processed with OpenAI and stored only in the local SQLite database
 - The app never has access to emails beyond what the logged-in user can access
+- Clients are associated with specific users through the user_id field
 
 ## Troubleshooting
 

@@ -27,6 +27,7 @@ export const clients = sqliteTable("clients", {
   name: text("name").notNull(),
   domains: text("domains").notNull(), // JSON string with domains
   emails: text("emails").notNull(),   // JSON string with specific emails
+  userId: text("user_id"),            // Associate clients with specific users
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

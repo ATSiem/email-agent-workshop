@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "~/lib/db";
 import { getUserAccessToken, setUserAccessToken } from "~/lib/auth/microsoft";
+import { env } from "~/lib/env";
+
+// Check if we're in development mode
+const isDevelopment = process.env.NODE_ENV !== 'production';
 
 // Schema for creating/updating a client
 const clientSchema = z.object({
@@ -39,6 +43,27 @@ export async function GET(request: Request) {
     console.log('Clients API - Setting user access token');
     setUserAccessToken(accessToken);
     
+    // Get user email from the request headers (set by auth-provider)
+    let userEmail = request.headers.get('X-User-Email');
+    console.log('Clients API - User email from request headers:', userEmail);
+    
+    // In development mode, use a default email if none is provided
+    if (!userEmail && isDevelopment) {
+      userEmail = 'dev@example.com';
+      console.log('Clients API - Using default development email:', userEmail);
+    }
+    
+    if (!userEmail) {
+      console.log('Clients API - No user email found, returning 401');
+      return NextResponse.json(
+        { 
+          error: "Authentication required",
+          message: "User email information is missing"
+        },
+        { status: 401 }
+      );
+    }
+    
     // Get client ID from URL if provided (for single client fetch)
     const url = new URL(request.url);
     const clientId = url.searchParams.get('id');
@@ -48,15 +73,15 @@ export async function GET(request: Request) {
     
     if (clientId) {
       console.log('Clients API - Fetching single client:', clientId);
-      // Fetch a single client
+      // Fetch a single client, ensuring it belongs to the current user
       const stmt = db.connection.prepare(`
-        SELECT * FROM clients WHERE id = ?
+        SELECT * FROM clients WHERE id = ? AND (user_id = ? OR user_id IS NULL)
       `);
       
-      const client = stmt.get(clientId);
+      const client = stmt.get(clientId, userEmail);
       
       if (!client) {
-        console.log('Clients API - Client not found');
+        console.log('Clients API - Client not found or does not belong to user');
         return NextResponse.json({ error: "Client not found" }, { status: 404 });
       }
       
@@ -68,14 +93,14 @@ export async function GET(request: Request) {
         emails: JSON.parse(client.emails),
       });
     } else {
-      console.log('Clients API - Fetching all clients');
-      // Fetch all clients
+      console.log('Clients API - Fetching all clients for user:', userEmail);
+      // Fetch all clients for the current user, including those without a user_id (for backward compatibility)
       const stmt = db.connection.prepare(`
-        SELECT * FROM clients ORDER BY name ASC
+        SELECT * FROM clients WHERE user_id = ? OR user_id IS NULL ORDER BY name ASC
       `);
       
-      const clients = stmt.all();
-      console.log('Clients API - Found', clients.length, 'clients');
+      const clients = stmt.all(userEmail);
+      console.log('Clients API - Found', clients.length, 'clients for user');
       
       // Parse JSON strings back to arrays for each client
       const formattedClients = clients.map(client => ({
@@ -123,6 +148,25 @@ export async function POST(request: Request) {
     // Set the token for Graph API calls that might happen later
     setUserAccessToken(accessToken);
     
+    // Get user email from the request headers (set by auth-provider)
+    let userEmail = request.headers.get('X-User-Email');
+    
+    // In development mode, use a default email if none is provided
+    if (!userEmail && isDevelopment) {
+      userEmail = 'dev@example.com';
+      console.log('Clients API - Using default development email:', userEmail);
+    }
+    
+    if (!userEmail) {
+      return NextResponse.json(
+        { 
+          error: "Authentication required",
+          message: "User email information is missing"
+        },
+        { status: 401 }
+      );
+    }
+    
     // Parse and validate the request body
     const body = await request.json();
     const data = clientSchema.parse(body);
@@ -130,17 +174,18 @@ export async function POST(request: Request) {
     // Generate a new client ID
     const clientId = crypto.randomUUID();
     
-    // Insert the new client
+    // Insert the new client with the user ID
     const stmt = db.connection.prepare(`
-      INSERT INTO clients (id, name, domains, emails, created_at, updated_at)
-      VALUES (?, ?, ?, ?, unixepoch(), unixepoch())
+      INSERT INTO clients (id, name, domains, emails, user_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, unixepoch(), unixepoch())
     `);
     
     stmt.run(
       clientId,
       data.name,
       JSON.stringify(data.domains),
-      JSON.stringify(data.emails)
+      JSON.stringify(data.emails),
+      userEmail
     );
     
     return NextResponse.json({
@@ -148,6 +193,7 @@ export async function POST(request: Request) {
       name: data.name,
       domains: data.domains,
       emails: data.emails,
+      userId: userEmail
     }, { status: 201 });
   } catch (error) {
     console.error("Error creating client:", error);
@@ -189,6 +235,25 @@ export async function PUT(request: Request) {
     // Set the token for Graph API calls that might happen later
     setUserAccessToken(accessToken);
     
+    // Get user email from the request headers (set by auth-provider)
+    let userEmail = request.headers.get('X-User-Email');
+    
+    // In development mode, use a default email if none is provided
+    if (!userEmail && isDevelopment) {
+      userEmail = 'dev@example.com';
+      console.log('Clients API - Using default development email:', userEmail);
+    }
+    
+    if (!userEmail) {
+      return NextResponse.json(
+        { 
+          error: "Authentication required",
+          message: "User email information is missing"
+        },
+        { status: 401 }
+      );
+    }
+    
     // Get client ID from URL
     const url = new URL(request.url);
     const clientId = url.searchParams.get('id');
@@ -204,29 +269,31 @@ export async function PUT(request: Request) {
     const body = await request.json();
     const data = clientSchema.parse(body);
     
-    // Check if client exists
+    // Check if client exists and belongs to the current user
     const checkStmt = db.connection.prepare(`
-      SELECT id FROM clients WHERE id = ?
+      SELECT id FROM clients WHERE id = ? AND (user_id = ? OR user_id IS NULL)
     `);
     
-    const existingClient = checkStmt.get(clientId);
+    const existingClient = checkStmt.get(clientId, userEmail);
     
     if (!existingClient) {
-      return NextResponse.json({ error: "Client not found" }, { status: 404 });
+      return NextResponse.json({ error: "Client not found or you don't have permission to update it" }, { status: 404 });
     }
     
     // Update the client
     const updateStmt = db.connection.prepare(`
       UPDATE clients
-      SET name = ?, domains = ?, emails = ?, updated_at = unixepoch()
-      WHERE id = ?
+      SET name = ?, domains = ?, emails = ?, user_id = ?, updated_at = unixepoch()
+      WHERE id = ? AND (user_id = ? OR user_id IS NULL)
     `);
     
     updateStmt.run(
       data.name,
       JSON.stringify(data.domains),
       JSON.stringify(data.emails),
-      clientId
+      userEmail,
+      clientId,
+      userEmail
     );
     
     return NextResponse.json({
@@ -234,6 +301,7 @@ export async function PUT(request: Request) {
       name: data.name,
       domains: data.domains,
       emails: data.emails,
+      userId: userEmail
     });
   } catch (error) {
     console.error("Error updating client:", error);
@@ -275,6 +343,25 @@ export async function DELETE(request: Request) {
     // Set the token for Graph API calls that might happen later
     setUserAccessToken(accessToken);
     
+    // Get user email from the request headers (set by auth-provider)
+    let userEmail = request.headers.get('X-User-Email');
+    
+    // In development mode, use a default email if none is provided
+    if (!userEmail && isDevelopment) {
+      userEmail = 'dev@example.com';
+      console.log('Clients API - Using default development email:', userEmail);
+    }
+    
+    if (!userEmail) {
+      return NextResponse.json(
+        { 
+          error: "Authentication required",
+          message: "User email information is missing"
+        },
+        { status: 401 }
+      );
+    }
+    
     // Get client ID from URL
     const url = new URL(request.url);
     const clientId = url.searchParams.get('id');
@@ -286,15 +373,15 @@ export async function DELETE(request: Request) {
       );
     }
     
-    // Check if client exists
+    // Check if client exists and belongs to the current user
     const checkStmt = db.connection.prepare(`
-      SELECT id FROM clients WHERE id = ?
+      SELECT id FROM clients WHERE id = ? AND (user_id = ? OR user_id IS NULL)
     `);
     
-    const existingClient = checkStmt.get(clientId);
+    const existingClient = checkStmt.get(clientId, userEmail);
     
     if (!existingClient) {
-      return NextResponse.json({ error: "Client not found" }, { status: 404 });
+      return NextResponse.json({ error: "Client not found or you don't have permission to delete it" }, { status: 404 });
     }
     
     // First, delete any associated report feedback
@@ -319,10 +406,10 @@ export async function DELETE(request: Request) {
     
     // Then delete the client
     const deleteClientStmt = db.connection.prepare(`
-      DELETE FROM clients WHERE id = ?
+      DELETE FROM clients WHERE id = ? AND (user_id = ? OR user_id IS NULL)
     `);
     
-    deleteClientStmt.run(clientId);
+    deleteClientStmt.run(clientId, userEmail);
     
     return NextResponse.json({ success: true });
   } catch (error) {
