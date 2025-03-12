@@ -57,6 +57,28 @@ try {
     }
   }
   
+  // Check if messages table exists
+  const messagesTableExists = db.prepare(`
+    SELECT name FROM sqlite_master 
+    WHERE type='table' AND name='messages'
+  `).get();
+  
+  if (messagesTableExists) {
+    console.log('Messages table exists, checking for processed_for_vector column');
+    
+    // Check if processed_for_vector column exists
+    const messagesTableInfo = db.prepare('PRAGMA table_info(messages)').all();
+    const processedForVectorExists = messagesTableInfo.some(column => column.name === 'processed_for_vector');
+    
+    if (!processedForVectorExists) {
+      console.log('Adding processed_for_vector column to messages table...');
+      db.prepare('ALTER TABLE messages ADD COLUMN processed_for_vector INTEGER DEFAULT 0').run();
+      console.log('Successfully added processed_for_vector column to messages table');
+    } else {
+      console.log('processed_for_vector column already exists in messages table');
+    }
+  }
+  
   // Create migrations table if it doesn't exist
   db.prepare(`
     CREATE TABLE IF NOT EXISTS migrations (
@@ -77,6 +99,24 @@ try {
       VALUES ('add_user_id_column', unixepoch())
     `).run();
     console.log('Migration recorded in migrations table');
+  }
+  
+  // Record processed_for_vector migration if it was added
+  const processedForVectorMigrationExists = db.prepare(`
+    SELECT name FROM migrations WHERE name = 'add_processed_for_vector_column'
+  `).get();
+  
+  if (!processedForVectorMigrationExists && messagesTableExists) {
+    const messagesTableInfo = db.prepare('PRAGMA table_info(messages)').all();
+    const processedForVectorExists = messagesTableInfo.some(column => column.name === 'processed_for_vector');
+    
+    if (processedForVectorExists) {
+      db.prepare(`
+        INSERT INTO migrations (name, applied_at) 
+        VALUES ('add_processed_for_vector_column', unixepoch())
+      `).run();
+      console.log('processed_for_vector migration recorded in migrations table');
+    }
   }
   
   // Close the database connection

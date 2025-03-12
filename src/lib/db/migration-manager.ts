@@ -1,6 +1,7 @@
 import { db } from './index';
 import { addCcBccColumns } from './migrations/add_cc_bcc_columns';
 import { addExamplePromptColumn } from './migrations/add_example_prompt_column';
+import { addProcessedForVectorColumn } from './migrations/add_processed_for_vector_column';
 
 /**
  * This function sets up and runs all database migrations
@@ -33,7 +34,8 @@ export async function runMigrations() {
     // Define migrations
     const migrations = [
       { name: 'add_cc_bcc_columns', fn: addCcBccColumns },
-      { name: 'add_example_prompt_column', fn: addExamplePromptColumn }
+      { name: 'add_example_prompt_column', fn: addExamplePromptColumn },
+      { name: 'add_processed_for_vector_column', fn: addProcessedForVectorColumn }
     ];
     
     // Run migrations that haven't been applied yet
