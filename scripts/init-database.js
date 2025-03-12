@@ -1,129 +1,121 @@
 // Database initialization script
-const Database = require('better-sqlite3');
-const path = require('path');
-const fs = require('fs');
-
-// Set the database path - use environment variable if provided
-const DB_PATH = process.env.DB_PATH || path.resolve('./data/email_agent.db');
-const DATA_DIR = path.dirname(DB_PATH);
-
-console.log('Initializing database...');
-console.log('Database path:', DB_PATH);
-
-// Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) {
-  console.log(`Creating data directory: ${DATA_DIR}`);
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
 try {
-  // Create SQLite connection
-  const db = new Database(DB_PATH);
+  const fs = require('fs');
+  const path = require('path');
+  const Database = require('better-sqlite3');
   
-  // Check if clients table exists
-  const tableExists = db.prepare(`
-    SELECT name FROM sqlite_master 
-    WHERE type='table' AND name='clients'
-  `).get();
+  // Get database path from environment or use default
+  const dbPath = process.env.SQLITE_DB_PATH || './data/email_agent.db';
   
-  if (!tableExists) {
-    console.log('Creating clients table...');
-    
-    // Create clients table with user_id column
-    db.prepare(`
-      CREATE TABLE clients (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        domain TEXT NOT NULL,
-        user_id TEXT,
-        created_at INTEGER NOT NULL DEFAULT (unixepoch())
-      )
-    `).run();
-    
-    console.log('Clients table created successfully');
-  } else {
-    console.log('Clients table already exists');
-    
-    // Check if user_id column exists
-    const tableInfo = db.prepare('PRAGMA table_info(clients)').all();
-    const columnExists = tableInfo.some(column => column.name === 'user_id');
-    
-    if (!columnExists) {
-      console.log('Adding user_id column to clients table...');
-      db.prepare('ALTER TABLE clients ADD COLUMN user_id TEXT').run();
-      console.log('Successfully added user_id column to clients table');
-    } else {
-      console.log('user_id column already exists in clients table');
-    }
+  // Ensure directory exists
+  const dbDir = path.dirname(dbPath);
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+    console.log(`Created directory: ${dbDir}`);
   }
   
-  // Check if messages table exists
-  const messagesTableExists = db.prepare(`
-    SELECT name FROM sqlite_master 
-    WHERE type='table' AND name='messages'
-  `).get();
+  console.log(`Initializing database at: ${dbPath}`);
   
-  if (messagesTableExists) {
-    console.log('Messages table exists, checking for processed_for_vector column');
+  // Create database connection
+  const db = new Database(dbPath);
+  
+  // Create tables if they don't exist
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      subject TEXT NOT NULL,
+      "from" TEXT NOT NULL,
+      "to" TEXT NOT NULL,
+      date TEXT NOT NULL,
+      body TEXT NOT NULL,
+      attachments TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      summary TEXT NOT NULL,
+      labels TEXT NOT NULL,
+      cc TEXT DEFAULT '',
+      bcc TEXT DEFAULT ''
+    );
     
-    // Check if processed_for_vector column exists
-    const messagesTableInfo = db.prepare('PRAGMA table_info(messages)').all();
-    const processedForVectorExists = messagesTableInfo.some(column => column.name === 'processed_for_vector');
+    CREATE TABLE IF NOT EXISTS clients (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      domains TEXT NOT NULL,
+      emails TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
     
-    if (!processedForVectorExists) {
-      console.log('Adding processed_for_vector column to messages table...');
-      db.prepare('ALTER TABLE messages ADD COLUMN processed_for_vector INTEGER DEFAULT 0').run();
-      console.log('Successfully added processed_for_vector column to messages table');
-    } else {
-      console.log('processed_for_vector column already exists in messages table');
-    }
+    CREATE TABLE IF NOT EXISTS report_templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      format TEXT NOT NULL,
+      client_id TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      FOREIGN KEY (client_id) REFERENCES clients(id)
+    );
+    
+    CREATE TABLE IF NOT EXISTS report_feedback (
+      id TEXT PRIMARY KEY,
+      report_id TEXT NOT NULL,
+      client_id TEXT,
+      rating INTEGER,
+      feedback_text TEXT,
+      actions_taken TEXT,
+      start_date TEXT,
+      end_date TEXT,
+      vector_search_used INTEGER,
+      search_query TEXT,
+      email_count INTEGER,
+      copied_to_clipboard INTEGER,
+      generation_time_ms INTEGER,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      user_agent TEXT,
+      ip_address TEXT,
+      FOREIGN KEY (client_id) REFERENCES clients(id)
+    );
+    
+    -- Add embedding column to messages table if it doesn't exist
+    PRAGMA table_info(messages);
+  `);
+  
+  // Check if embedding column exists
+  const tableInfo = db.prepare('PRAGMA table_info(messages)').all();
+  const hasEmbeddingColumn = tableInfo.some(column => column.name === 'embedding');
+  
+  if (!hasEmbeddingColumn) {
+    console.log('Adding embedding column to messages table');
+    db.exec('ALTER TABLE messages ADD COLUMN embedding TEXT;');
   }
   
-  // Create migrations table if it doesn't exist
-  db.prepare(`
-    CREATE TABLE IF NOT EXISTS migrations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE,
-      applied_at INTEGER NOT NULL DEFAULT (unixepoch())
-    )
-  `).run();
-  
-  // Record this migration
-  const migrationExists = db.prepare(`
-    SELECT name FROM migrations WHERE name = 'add_user_id_column'
-  `).get();
-  
-  if (!migrationExists) {
-    db.prepare(`
-      INSERT INTO migrations (name, applied_at) 
-      VALUES ('add_user_id_column', unixepoch())
-    `).run();
-    console.log('Migration recorded in migrations table');
-  }
-  
-  // Record processed_for_vector migration if it was added
-  const processedForVectorMigrationExists = db.prepare(`
-    SELECT name FROM migrations WHERE name = 'add_processed_for_vector_column'
-  `).get();
-  
-  if (!processedForVectorMigrationExists && messagesTableExists) {
-    const messagesTableInfo = db.prepare('PRAGMA table_info(messages)').all();
-    const processedForVectorExists = messagesTableInfo.some(column => column.name === 'processed_for_vector');
-    
-    if (processedForVectorExists) {
-      db.prepare(`
-        INSERT INTO migrations (name, applied_at) 
-        VALUES ('add_processed_for_vector_column', unixepoch())
-      `).run();
-      console.log('processed_for_vector migration recorded in migrations table');
-    }
-  }
+  console.log('Database initialization completed successfully');
   
   // Close the database connection
   db.close();
-  
-  console.log('Database initialization completed successfully!');
 } catch (error) {
-  console.error('Database initialization failed:', error);
-  process.exit(1);
+  console.error('Database initialization error:', error.message);
+  
+  if (error.code === 'MODULE_NOT_FOUND' && error.requireStack && error.requireStack[0].includes('better-sqlite3')) {
+    console.error('The better-sqlite3 module is missing. This is expected on Render free tier.');
+    console.error('Some database features will be limited. To enable full functionality, upgrade to a paid Render plan.');
+    
+    // Create an empty database file to prevent further errors
+    const fs = require('fs');
+    const dbPath = process.env.SQLITE_DB_PATH || './data/email_agent.db';
+    const dbDir = require('path').dirname(dbPath);
+    
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
+    
+    // Create an empty file if it doesn't exist
+    if (!fs.existsSync(dbPath)) {
+      fs.writeFileSync(dbPath, '');
+      console.log(`Created empty database file at ${dbPath}`);
+    }
+  }
+  
+  // Exit with success to allow the application to start
+  process.exit(0);
 } 

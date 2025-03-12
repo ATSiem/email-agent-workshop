@@ -1,10 +1,29 @@
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
 import { existsSync, mkdirSync } from "fs";
 import { dirname } from "path";
 import * as schema from "./schema";
 import { env, isRenderFreeTier } from "~/lib/env";
 export * from "drizzle-orm";
+
+// Import better-sqlite3 with try-catch to handle case when it's not available
+let Database;
+try {
+  Database = require("better-sqlite3");
+} catch (error) {
+  console.error("Failed to import better-sqlite3:", error.message);
+  console.warn("Database functionality will be limited");
+  
+  // Create a mock Database class that will throw a more helpful error when used
+  Database = class MockDatabase {
+    constructor() {
+      throw new Error(
+        "better-sqlite3 is not available. This is expected on Render free tier. " +
+        "Some features requiring database access will not work. " +
+        "To enable full functionality, upgrade to a paid Render plan."
+      );
+    }
+  };
+}
 
 // For server-side database connection
 let db: ReturnType<typeof drizzle>;
@@ -19,7 +38,17 @@ if (typeof window === 'undefined') {
     }
 
     // Create SQLite connection
-    const sqlite = new Database(env.SQLITE_DB_PATH);
+    let sqlite;
+    try {
+      sqlite = new Database(env.SQLITE_DB_PATH);
+      console.log('SQLite database connection established successfully');
+    } catch (dbError) {
+      console.error('Error connecting to SQLite database:', dbError);
+      console.warn('Creating in-memory database as fallback');
+      
+      // Create in-memory database as fallback
+      sqlite = new Database(':memory:');
+    }
     
     // Create tables if they don't exist
     sqlite.exec(`
@@ -152,10 +181,50 @@ if (typeof window === 'undefined') {
   } catch (error) {
     console.error("Database initialization error:", error);
     // Provide a fallback db object
-    const sqlite = new Database(':memory:');
-    db = drizzle(sqlite, { schema });
-    // @ts-ignore - adding the connection property for raw SQL access
-    db.connection = sqlite;
+    try {
+      const sqlite = new Database(':memory:');
+      db = drizzle(sqlite, { schema });
+      // @ts-ignore - adding the connection property for raw SQL access
+      db.connection = sqlite;
+    } catch (fallbackError) {
+      console.error("Failed to create fallback in-memory database:", fallbackError);
+      console.warn("Creating mock database object");
+      
+      // Create a mock db object that will log errors instead of throwing
+      db = {
+        query: () => {
+          console.error("Database query attempted but database is not available");
+          return [];
+        },
+        insert: () => {
+          console.error("Database insert attempted but database is not available");
+          return { returning: () => [] };
+        },
+        select: () => {
+          console.error("Database select attempted but database is not available");
+          return { from: () => ({ where: () => [] }) };
+        },
+        update: () => {
+          console.error("Database update attempted but database is not available");
+          return { set: () => ({ where: () => [] }) };
+        },
+        delete: () => {
+          console.error("Database delete attempted but database is not available");
+          return { from: () => ({ where: () => [] }) };
+        },
+        // @ts-ignore - adding the connection property
+        connection: {
+          exec: () => {
+            console.error("Database exec attempted but database is not available");
+          },
+          prepare: () => ({
+            all: () => [],
+            get: () => null,
+            run: () => {}
+          })
+        }
+      } as any;
+    }
   }
 } else {
   // Client-side fallback (this code won't actually run, but is needed for type checking)

@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: client-reports
+    runtime: node
+    buildCommand: npm run render:build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: RENDER
+        value: "true"
+      - key: PORT
+        value: 10000
+      - key: SQLITE_DB_PATH
+        value: ./data/email_agent.db
+      - key: npm_config_build_from_source
+        value: "true"
+    buildFilter:
+      paths:
+        - src/**
+        - scripts/**
+        - package.json
+        - package-lock.json
+        - next.config.js
+        - tsconfig.json
+        - render.yaml
+        - scripts/render-build.sh
+    healthCheckPath: /api/health 
