@@ -20,7 +20,7 @@ export function ClientPage() {
     <div className="mx-auto mt-10 max-w-screen-lg">
       <div className="mb-6 flex justify-between items-center">
         <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold">Client Reports</h1>
+          <h1 className="text-2xl font-bold">📬 Client Reports</h1>
         </div>
         <div className="flex items-center gap-4">
           {/* Dark mode toggle */}

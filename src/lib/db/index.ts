@@ -117,12 +117,16 @@ if (typeof window === 'undefined') {
           return 0;
         }
       });
+      console.log('SQLite vector search extensions successfully initialized');
     } else {
       if (isRenderFreeTier) {
-        console.warn('SQLite create_function method not available on Render free tier - vector search functionality is disabled');
-        console.warn('TODO: Upgrade to Render paid tier ($7/mo) to enable vector search functionality');
+        console.warn('⚠️ SQLite create_function method not available on Render free tier');
+        console.warn('⚠️ Vector search (AI search) functionality is disabled');
+        console.warn('⚠️ To enable this feature, upgrade to Render paid tier ($7/mo or higher)');
+        console.warn('⚠️ Add a persistent disk and set RENDER_DISK_MOUNTED environment variable');
       } else {
         console.warn('SQLite create_function method not available - vector search functionality will be limited');
+        console.warn('This may be due to SQLite version or build configuration');
       }
     }
     

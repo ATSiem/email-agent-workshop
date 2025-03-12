@@ -542,26 +542,29 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
                   <label htmlFor="searchQuery" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Search Filter (Optional)
                   </label>
-                  <label className={`flex items-center space-x-2 ${isRenderFreeTier ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} group relative`}>
+                  <label className={`flex items-center space-x-2 ${isRenderFreeTier ? 'cursor-not-allowed' : 'cursor-pointer'} group relative`}>
                     <input
                       type="checkbox"
-                      checked={useVectorSearch}
+                      checked={false}
                       onChange={(e) => !isRenderFreeTier && setUseVectorSearch(e.target.checked)}
-                      disabled={isRenderFreeTier}
+                      disabled={true}
                       className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded disabled:opacity-50"
                     />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">Use AI search</span>
-                    <div className="absolute bottom-full left-0 mb-2 w-72 p-2 bg-gray-800 text-white text-xs rounded shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity z-10">
-                      {isRenderFreeTier ? 
-                        "AI search is disabled on Render free tier. This feature requires SQLite extensions which are only available on paid Render plans ($7/mo or higher). TODO: Upgrade to enable this feature." : 
-                        "AI search uses advanced technology to find related concepts, not just exact keyword matches. For example, searching for \"pricing\" could find discussions about \"cost\", \"budget\", or \"financial considerations\"."}
-                    </div>
-                    {isRenderFreeTier && (
-                      <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
-                        Requires Upgrade
-                      </span>
-                    )}
+                    <span className="text-sm text-gray-700 dark:text-gray-300 relative">
+                      Use AI search
+                      <div className="absolute bottom-full left-0 mb-2 w-72 p-2 bg-gray-800 text-white text-xs rounded shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity z-10">
+                        AI search is disabled on Render free tier. This feature requires SQLite extensions which are only available on paid Render plans ($7/mo or higher). AI search uses advanced technology to find related concepts, not just exact keyword matches. For example, searching for "pricing" could find discussions about "cost", "budget", or "financial considerations".
+                      </div>
+                    </span>
+                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
+                      Requires Upgrade
+                    </span>
                   </label>
+                </div>
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-amber-800 text-sm mb-2">
+                  <p className="font-medium">AI Search is disabled on Render</p>
+                  <p className="mt-1">This feature requires SQLite extensions which are only available on paid Render plans ($7/mo or higher).</p>
+                  <p className="mt-1">Standard keyword search is still available and will work normally.</p>
                 </div>
                 <input
                   type="text"
@@ -569,12 +572,10 @@ export function ReportGenerator({ initialClientId, onReportGenerated }: ReportGe
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                  placeholder={useVectorSearch && !isRenderFreeTier ? "Enter search terms (AI will find related concepts)" : "Enter keywords to filter emails"}
+                  placeholder="Enter keywords to filter emails"
                 />
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {useVectorSearch 
-                    ? "AI search finds semantically related emails, even without exact keyword matches (e.g., searching for 'pricing' will find 'budget', 'cost', etc.)"
-                    : "Standard search finds emails containing your exact keywords. Enable AI search for more comprehensive results."}
+                  Standard search finds emails containing your exact keywords. AI search is not available on Render.
                 </p>
               </div>
             </div>

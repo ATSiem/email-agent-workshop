@@ -84,6 +84,14 @@ export const isRender = typeof process !== 'undefined' &&
 // This will be true if we're on Render and don't have a disk mounted
 export const isRenderFreeTier = isRender && !process.env.RENDER_DISK_MOUNTED;
 
+// Log Render environment detection for debugging
+if (isRender) {
+  console.log('Running on Render platform');
+  console.log(`Render free tier detection: ${isRenderFreeTier ? 'YES (free tier)' : 'NO (paid tier)'}`);
+  console.log(`Render disk mounted: ${process.env.RENDER_DISK_MOUNTED ? 'YES' : 'NO'}`);
+  console.log(`Render service ID: ${process.env.RENDER_SERVICE_ID || 'not set'}`);
+}
+
 // TODO: Upgrade to Render's paid tier ($7/mo) to enable vector search functionality
 // The free tier doesn't support SQLite extensions needed for vector search
 
